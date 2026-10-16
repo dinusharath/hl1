@@ -1,0 +1,963 @@
+<title>Resilient Form Ingestion — Design Doc</title>
+<style>
+  /* ---------- Tokens ---------- */
+  :root{
+    --bg:#eceff0; --surface:#ffffff; --surface-2:#f3f6f6; --surface-3:#e8eded;
+    --border:#d8e0e0; --border-strong:#c3cfcf;
+    --ink:#0d1b1e; --ink-soft:#35494e; --muted:#687c80;
+    --accent:#0f766e; --accent-bright:#0d9488; --accent-wash:#d8efec; --accent-ink:#0b4f49;
+    --ok:#15803d; --ok-wash:#dcf3e4;
+    --warn:#b45309; --warn-wash:#fbeacb;
+    --crit:#be123c; --crit-wash:#fbdde4;
+    --info:#1d4ed8; --info-wash:#dbe6fe;
+    --pg:#336791; --docker:#2496ed; --ts:#3178c6; --prisma:#4c51bf; --express:#1f2937;
+    --shadow:0 1px 2px rgba(13,27,30,.05), 0 8px 24px -12px rgba(13,27,30,.18);
+    --shadow-lg:0 2px 6px rgba(13,27,30,.06), 0 24px 60px -24px rgba(13,27,30,.28);
+    --radius:14px; --radius-sm:9px;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0a1316; --surface:#111d21; --surface-2:#16242a; --surface-3:#1d2f35;
+      --border:#223036; --border-strong:#2c3f47;
+      --ink:#e8f0f0; --ink-soft:#bcccce; --muted:#8aa0a3;
+      --accent:#2dd4bf; --accent-bright:#5eead4; --accent-wash:#123733; --accent-ink:#99f6e4;
+      --ok:#4ade80; --ok-wash:#0f2f1d;
+      --warn:#fbbf24; --warn-wash:#36260a;
+      --crit:#fb7185; --crit-wash:#39131d;
+      --info:#60a5fa; --info-wash:#112442;
+      --express:#e5e7eb;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.6);
+      --shadow-lg:0 2px 8px rgba(0,0,0,.5), 0 30px 70px -28px rgba(0,0,0,.75);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eceff0; --surface:#ffffff; --surface-2:#f3f6f6; --surface-3:#e8eded;
+    --border:#d8e0e0; --border-strong:#c3cfcf;
+    --ink:#0d1b1e; --ink-soft:#35494e; --muted:#687c80;
+    --accent:#0f766e; --accent-bright:#0d9488; --accent-wash:#d8efec; --accent-ink:#0b4f49;
+    --ok:#15803d; --ok-wash:#dcf3e4; --warn:#b45309; --warn-wash:#fbeacb;
+    --crit:#be123c; --crit-wash:#fbdde4; --info:#1d4ed8; --info-wash:#dbe6fe;
+    --express:#1f2937;
+    --shadow:0 1px 2px rgba(13,27,30,.05), 0 8px 24px -12px rgba(13,27,30,.18);
+    --shadow-lg:0 2px 6px rgba(13,27,30,.06), 0 24px 60px -24px rgba(13,27,30,.28);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0a1316; --surface:#111d21; --surface-2:#16242a; --surface-3:#1d2f35;
+    --border:#223036; --border-strong:#2c3f47;
+    --ink:#e8f0f0; --ink-soft:#bcccce; --muted:#8aa0a3;
+    --accent:#2dd4bf; --accent-bright:#5eead4; --accent-wash:#123733; --accent-ink:#99f6e4;
+    --ok:#4ade80; --ok-wash:#0f2f1d; --warn:#fbbf24; --warn-wash:#36260a;
+    --crit:#fb7185; --crit-wash:#39131d; --info:#60a5fa; --info-wash:#112442;
+    --express:#e5e7eb;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.6);
+    --shadow-lg:0 2px 8px rgba(0,0,0,.5), 0 30px 70px -28px rgba(0,0,0,.75);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .doc{
+    background:
+      radial-gradient(1200px 500px at 85% -5%, var(--accent-wash), transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans);
+    font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased;
+    padding:0 20px 120px;
+  }
+  .wrap{max-width:940px; margin:0 auto}
+  .col{max-width:720px}
+  .doc ::selection{background:var(--accent-wash); color:var(--ink)}
+
+  /* ---------- Type ---------- */
+  h1,h2,h3{text-wrap:balance; line-height:1.15; color:var(--ink)}
+  h2{font-size:30px; font-weight:700; letter-spacing:-.02em; margin:0 0 6px}
+  h3{font-size:20px; font-weight:650; letter-spacing:-.01em; margin:34px 0 10px}
+  p{margin:0 0 16px; color:var(--ink-soft)}
+  .lead{font-size:20px; color:var(--ink-soft); line-height:1.55}
+  a{color:var(--accent-bright); text-decoration-color:color-mix(in srgb,var(--accent-bright),transparent 55%); text-underline-offset:3px}
+  strong{color:var(--ink); font-weight:650}
+  code{font-family:var(--mono); font-size:.86em; background:var(--surface-2);
+    border:1px solid var(--border); padding:1px 6px; border-radius:6px; color:var(--accent-ink)}
+  @media (prefers-color-scheme:dark){code{color:var(--accent-bright)}}
+  :root[data-theme="dark"] code{color:var(--accent-bright)}
+  :root[data-theme="light"] code{color:var(--accent-ink)}
+
+  .eyebrow{font-family:var(--mono); font-size:12px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--accent); font-weight:600}
+
+  /* ---------- Hero ---------- */
+  header.hero{padding:76px 0 30px}
+  .kicker{display:inline-flex; align-items:center; gap:9px; font-family:var(--mono);
+    font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent);
+    background:var(--surface); border:1px solid var(--border); padding:7px 13px; border-radius:999px;
+    box-shadow:var(--shadow)}
+  .kicker .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-wash)}
+  h1.title{font-family:var(--serif); font-weight:600; font-size:clamp(40px,7vw,64px);
+    line-height:1.04; letter-spacing:-.015em; margin:22px 0 0}
+  h1.title em{font-style:italic; color:var(--accent)}
+  .hero .lead{margin-top:20px; max-width:640px}
+  .meta{display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:28px; align-items:center;
+    font-size:14px; color:var(--muted)}
+  .meta b{color:var(--ink-soft); font-weight:600}
+  .chips{display:flex; flex-wrap:wrap; gap:9px; margin-top:26px}
+  .chip{display:inline-flex; align-items:center; gap:8px; background:var(--surface);
+    border:1px solid var(--border); border-radius:999px; padding:7px 14px 7px 9px; font-size:13.5px;
+    font-weight:550; color:var(--ink-soft); box-shadow:var(--shadow)}
+  .chip svg{width:18px;height:18px;display:block}
+
+  /* ---------- Rules / bands ---------- */
+  .rule{height:1px; background:linear-gradient(90deg,var(--border),transparent); border:0; margin:0}
+  section{padding:48px 0}
+  .sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:22px}
+  .sec-num{font-family:var(--serif); font-style:italic; font-size:30px; color:var(--accent);
+    opacity:.85; line-height:1}
+  .band{background:var(--surface); border:1px solid var(--border); border-radius:22px;
+    box-shadow:var(--shadow-lg); padding:30px; margin:8px 0}
+  .band.tight{padding:22px}
+  .band-title{display:flex; align-items:center; gap:11px; margin-bottom:4px}
+  .band-title h3{margin:0}
+  .band-title .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:var(--accent-wash); color:var(--accent); flex:0 0 auto}
+  .band-title .ic svg{width:20px;height:20px}
+  .band-sub{color:var(--muted); font-size:14.5px; margin:0 0 20px}
+
+  /* ---------- Callouts ---------- */
+  .callout{display:flex; gap:14px; border:1px solid var(--border); border-left:4px solid var(--accent);
+    background:var(--surface); border-radius:12px; padding:16px 18px; margin:20px 0; box-shadow:var(--shadow)}
+  .callout .ci{flex:0 0 auto; width:26px;height:26px; color:var(--accent)}
+  .callout.warn{border-left-color:var(--warn)} .callout.warn .ci{color:var(--warn)}
+  .callout.crit{border-left-color:var(--crit)} .callout.crit .ci{color:var(--crit)}
+  .callout p{margin:0; font-size:15px; color:var(--ink-soft)}
+  .callout b{color:var(--ink)}
+
+  /* ---------- Flow diagram ---------- */
+  .scroll{overflow-x:auto; padding-bottom:8px; margin:0 -6px; scrollbar-width:thin}
+  .flow{display:flex; align-items:stretch; gap:0; min-width:min-content; padding:6px}
+  .stage{display:flex; align-items:center}
+  .node{width:150px; min-height:150px; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:16px; padding:16px 14px; display:flex; flex-direction:column; gap:9px;
+    box-shadow:var(--shadow); position:relative}
+  .node .nic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;
+    background:var(--surface); border:1px solid var(--border)}
+  .node .nic svg{width:26px;height:26px}
+  .node .nt{font-weight:650; font-size:14.5px; color:var(--ink); line-height:1.25}
+  .node .ns{font-family:var(--mono); font-size:11.5px; color:var(--muted); line-height:1.35}
+  .node.db{background:color-mix(in srgb,var(--pg),var(--surface) 90%); border-color:color-mix(in srgb,var(--pg),var(--border) 60%)}
+  .node.store .nic{border-color:color-mix(in srgb,var(--pg),var(--border) 40%)}
+  .node.hl{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-wash), var(--shadow)}
+  .ntag{position:absolute; top:-10px; left:12px; font-family:var(--mono); font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; font-weight:600; padding:2px 7px; border-radius:6px;
+    border:1px solid; background:var(--surface)}
+  .ntag.key{color:var(--accent); border-color:color-mix(in srgb,var(--accent),var(--border))}
+  .ntag.once{color:var(--ok); border-color:color-mix(in srgb,var(--ok),var(--border)); background:var(--ok-wash)}
+  .ntag.most{color:var(--info); border-color:color-mix(in srgb,var(--info),var(--border)); background:var(--info-wash)}
+  .conn{display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:5px; width:62px; flex:0 0 auto; color:var(--muted)}
+  .conn svg{width:30px;height:16px}
+  .conn .cl{font-family:var(--mono); font-size:10px; letter-spacing:.03em; text-align:center; color:var(--muted); max-width:60px; line-height:1.25}
+  .branchwrap{display:flex; flex-direction:column; align-items:stretch; gap:14px}
+
+  /* ---------- State machine ---------- */
+  .track{display:flex; align-items:center; flex-wrap:wrap; gap:0; padding:4px}
+  .st{font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:.02em;
+    padding:9px 15px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border);
+    color:var(--ink-soft); white-space:nowrap}
+  .st.done{background:var(--ok-wash); border-color:color-mix(in srgb,var(--ok),var(--border)); color:var(--ok)}
+  .st.start{background:var(--accent-wash); border-color:color-mix(in srgb,var(--accent),var(--border)); color:var(--accent)}
+  .st.review{background:var(--warn-wash); border-color:color-mix(in srgb,var(--warn),var(--border)); color:var(--warn)}
+  .st.fail{background:var(--crit-wash); border-color:color-mix(in srgb,var(--crit),var(--border)); color:var(--crit)}
+  .arr{color:var(--border-strong); display:grid;place-items:center; padding:0 9px}
+  .arr svg{width:22px;height:14px}
+  .branch{display:flex; align-items:center; gap:0; margin-top:14px; padding-left:38px}
+  .branch .bl{font-family:var(--mono); font-size:11px; color:var(--warn); margin-right:8px}
+
+  /* ---------- ERD ---------- */
+  .erd{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+  @media(max-width:760px){.erd{grid-template-columns:1fr}}
+  .tbl{background:var(--surface-2); border:1px solid var(--border); border-radius:14px; overflow:hidden; box-shadow:var(--shadow)}
+  .tbl .th{display:flex; align-items:center; gap:9px; padding:12px 14px; background:var(--surface-3);
+    border-bottom:1px solid var(--border); font-family:var(--mono); font-weight:650; font-size:13.5px; color:var(--ink)}
+  .tbl .th svg{width:17px;height:17px;color:var(--pg)}
+  .tbl ul{list-style:none; margin:0; padding:7px 0}
+  .tbl li{display:flex; align-items:center; gap:8px; padding:5px 14px; font-family:var(--mono); font-size:12.5px; color:var(--ink-soft)}
+  .tbl li .bd{margin-left:auto; font-size:9.5px; letter-spacing:.06em; padding:1px 6px; border-radius:5px; text-transform:uppercase; font-weight:700}
+  .bd.pk{background:var(--accent-wash); color:var(--accent)}
+  .bd.uq{background:var(--ok-wash); color:var(--ok)}
+  .bd.fk{background:var(--info-wash); color:var(--info)}
+  .bd.js{background:var(--warn-wash); color:var(--warn)}
+  .relnote{display:flex; gap:10px; align-items:center; justify-content:center; margin-top:16px;
+    font-family:var(--mono); font-size:12px; color:var(--muted); flex-wrap:wrap}
+  .relnote .r{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--border);padding:5px 11px;border-radius:999px}
+
+  /* ---------- Tables ---------- */
+  .tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow)}
+  table.cmp{border-collapse:collapse; width:100%; min-width:560px; font-size:14.5px; background:var(--surface)}
+  table.cmp th{text-align:left; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--muted); font-weight:650; padding:13px 16px; border-bottom:1px solid var(--border); background:var(--surface-2)}
+  table.cmp td{padding:13px 16px; border-bottom:1px solid var(--border); color:var(--ink-soft); vertical-align:top}
+  table.cmp tr:last-child td{border-bottom:0}
+  table.cmp td.opt{font-weight:650; color:var(--ink); white-space:nowrap}
+  table.cmp tr.pick{background:var(--accent-wash)}
+  table.cmp tr.pick td{color:var(--accent-ink)}
+  @media (prefers-color-scheme:dark){table.cmp tr.pick td{color:var(--accent-bright)}}
+  :root[data-theme="dark"] table.cmp tr.pick td{color:var(--accent-bright)}
+  :root[data-theme="light"] table.cmp tr.pick td{color:var(--accent-ink)}
+  table.cmp tr.pick td.opt{color:var(--accent)}
+  .star{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--accent);font-weight:700;margin-top:4px}
+  .pro{color:var(--ok)} .con{color:var(--crit)}
+  .pclist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+  .pclist li{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;line-height:1.4}
+  .pclist li svg{width:15px;height:15px;flex:0 0 auto;margin-top:2px}
+
+  /* ---------- Guarantee cards ---------- */
+  .gcards{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+  @media(max-width:680px){.gcards{grid-template-columns:1fr}}
+  .gcard{border:1px solid var(--border); border-radius:16px; padding:22px; background:var(--surface-2); box-shadow:var(--shadow)}
+  .gcard .gh{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .gcard .gh .gi{width:40px;height:40px;border-radius:11px;display:grid;place-items:center}
+  .gcard .gh .gi svg{width:23px;height:23px}
+  .gcard h4{margin:0;font-size:16.5px;color:var(--ink)}
+  .gcard .glabel{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+  .gcard.once .gi{background:var(--ok-wash);color:var(--ok)} .gcard.once .glabel{color:var(--ok)}
+  .gcard.most .gi{background:var(--info-wash);color:var(--info)} .gcard.most .glabel{color:var(--info)}
+  .gcard p{font-size:14px;margin:10px 0 0}
+
+  /* ---------- Decision rationale ---------- */
+  .why{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:8px}
+  @media(max-width:680px){.why{grid-template-columns:1fr}}
+  .whyc{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow)}
+  .whyc .wt{display:flex;align-items:center;gap:10px;font-weight:650;color:var(--ink);margin-bottom:6px;font-size:15.5px}
+  .whyc .wt svg{width:20px;height:20px;color:var(--accent)}
+  .whyc p{margin:0;font-size:14px}
+
+  /* ---------- Edge-case grid ---------- */
+  .edges{display:grid;grid-template-columns:1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .edge{display:grid;grid-template-columns:minmax(0,1.1fr) 24px minmax(0,1fr);gap:12px;align-items:center;
+    background:var(--surface);padding:13px 16px}
+  @media(max-width:620px){.edge{grid-template-columns:1fr;gap:5px}.edge .ea{display:none}}
+  .edge .efrom{font-family:var(--mono);font-size:13px;color:var(--ink-soft)}
+  .edge .eto{font-size:13.5px;color:var(--ink)}
+  .edge .eto b{color:var(--accent)}
+  .edge .ea{color:var(--border-strong);display:grid;place-items:center}
+  .edge .ea svg{width:20px;height:13px}
+
+  /* ---------- Footer ---------- */
+  footer{padding:50px 0 0;color:var(--muted);font-size:13.5px;border-top:1px solid var(--border);margin-top:30px}
+  footer code{font-size:12.5px}
+
+  @media (prefers-reduced-motion:no-preference){
+    .node,.gcard,.whyc{transition:transform .18s ease, box-shadow .18s ease}
+    .node:hover,.gcard:hover,.whyc:hover{transform:translateY(-2px)}
+  }
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+  /* ---- Force a clean WHITE, light-only rendering (ignore OS/viewer dark mode) ---- */
+  :root, :root[data-theme="light"]{ --bg:#ffffff; }
+  .doc{ background:#ffffff !important; }
+  @media (prefers-color-scheme:dark){ :root{
+    --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f6f6; --surface-3:#e8eded;
+    --border:#d8e0e0; --border-strong:#c3cfcf; --ink:#0d1b1e; --ink-soft:#35494e; --muted:#687c80;
+    --accent:#0f766e; --accent-bright:#0d9488; --accent-wash:#d8efec; --accent-ink:#0b4f49;
+    --ok:#15803d; --ok-wash:#dcf3e4; --warn:#b45309; --warn-wash:#fbeacb;
+    --crit:#be123c; --crit-wash:#fbdde4; --info:#1d4ed8; --info-wash:#dbe6fe; --express:#1f2937;
+    --shadow:0 1px 2px rgba(13,27,30,.05), 0 8px 24px -12px rgba(13,27,30,.18);
+    --shadow-lg:0 2px 6px rgba(13,27,30,.06), 0 24px 60px -24px rgba(13,27,30,.28);
+  } }
+  :root[data-theme="dark"]{
+    --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f6f6; --surface-3:#e8eded;
+    --border:#d8e0e0; --border-strong:#c3cfcf; --ink:#0d1b1e; --ink-soft:#35494e; --muted:#687c80;
+    --accent:#0f766e; --accent-bright:#0d9488; --accent-wash:#d8efec; --accent-ink:#0b4f49;
+    --ok:#15803d; --ok-wash:#dcf3e4; --warn:#b45309; --warn-wash:#fbeacb;
+    --crit:#be123c; --crit-wash:#fbdde4; --info:#1d4ed8; --info-wash:#dbe6fe; --express:#1f2937;
+    --shadow:0 1px 2px rgba(13,27,30,.05), 0 8px 24px -12px rgba(13,27,30,.18);
+    --shadow-lg:0 2px 6px rgba(13,27,30,.06), 0 24px 60px -24px rgba(13,27,30,.28);
+  }
+</style>
+
+<!-- ===== Icon + logo sprite ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- UI icons: 24x24 stroke, currentColor -->
+    <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 18h9a4 4 0 0 0 .8-7.9A5.5 5.5 0 0 0 6 9.2 3.8 3.8 0 0 0 7 18Z"/><path d="M9.5 13.5 11 15l3-3.2"/>
+    </symbol>
+    <symbol id="i-api" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/>
+      <path d="M7 7.5h.01M7 16.5h.01"/><path d="M13 7.5h4M13 16.5h4"/>
+    </symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.2"/>
+      <path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/>
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 21s6.5-5.4 6.5-10.5A6.5 6.5 0 0 0 5.5 10.5C5.5 15.6 12 21 12 21Z"/><circle cx="12" cy="10.3" r="2.3"/>
+    </symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/>
+    </symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4.5M12 4.5a1.4 1.4 0 1 0 0-.1"/>
+      <path d="M9 13h.01M15 13h.01"/><path d="M9.5 16.3h5"/><path d="M4 12H2.5M21.5 12H20"/>
+    </symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 11a8 8 0 1 0-1.3 5"/><path d="M20 4.5V10h-5.5"/>
+    </symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2.6 20 5.4v6c0 5-3.4 8.3-8 9.9-4.6-1.6-8-4.9-8-9.9v-6Z"/><path d="m8.8 11.6 2.2 2.2 4.2-4.3"/>
+    </symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="8" cy="8" r="4.3"/><path d="m11 11 8 8M16 16l2-2M18.5 18.5 20 17"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 6.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3.5 22 20H2L12 3.5Z"/><path d="M12 10v4.2M12 17.3h.01"/>
+    </symbol>
+    <symbol id="i-db" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v13c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-13"/><path d="M19.5 12c0 1.7-3.4 3-7.5 3s-7.5-1.3-7.5-3"/>
+    </symbol>
+    <symbol id="i-split" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6" cy="12" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="18" cy="18" r="2.3"/>
+      <path d="M8 11 16 6.8M8 13l8 4.2"/>
+    </symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 2.5h8l4 4v15H6Z"/><path d="M14 2.5v4h4"/><path d="M8.5 12h7M8.5 15.5h7M8.5 8.5h3"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 30 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8h26m-6-5 6 5-6 5"/></symbol>
+    <symbol id="i-arrow-sm" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h18m-5-4 5 4-5 4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5M3 11l9 5 9-5"/>
+    </symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v18M7 21h10M4 8h16"/><path d="M4 8 2 13a2.5 2.5 0 0 0 5 0L4 8Zm16 0-2 5a2.5 2.5 0 0 0 5 0l-3-5Z"/>
+    </symbol>
+    <symbol id="i-test" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 3h6M10 3v6l-4.5 8A2 2 0 0 0 7.3 20h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M8.5 14h7"/>
+    </symbol>
+
+    <!-- Brand logos (own viewBox, brand fills) -->
+    <symbol id="logo-postgres" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5.5" rx="7.4" ry="2.9" fill="none" stroke="#336791" stroke-width="1.7"/>
+      <path d="M4.6 5.5v13c0 1.6 3.3 2.9 7.4 2.9s7.4-1.3 7.4-2.9v-13" fill="none" stroke="#336791" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M19.4 12c0 1.6-3.3 2.9-7.4 2.9S4.6 13.6 4.6 12" fill="none" stroke="#336791" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="logo-docker" viewBox="0 0 32 24">
+      <g fill="#2496ed">
+        <rect x="4" y="9.5" width="3.6" height="3.4" rx=".4"/><rect x="8.1" y="9.5" width="3.6" height="3.4" rx=".4"/>
+        <rect x="12.2" y="9.5" width="3.6" height="3.4" rx=".4"/><rect x="8.1" y="5.8" width="3.6" height="3.4" rx=".4"/>
+        <rect x="12.2" y="5.8" width="3.6" height="3.4" rx=".4"/><rect x="16.3" y="9.5" width="3.6" height="3.4" rx=".4"/>
+      </g>
+      <path d="M29.5 10.4c-.6-.4-2-.6-3-.4-.1-1-.7-1.9-1.6-2.6l-.5-.4-.4.5c-.5.6-.7 1.6-.6 2.4.05.4.2.9.5 1.2-.3.2-1 .4-1.9.4H2.2c-.3 1.9.2 4.4 1.7 6.2 1.5 1.7 3.7 2.6 6.6 2.6 6.3 0 11-2.9 13.1-8.2 1 0 2.9 0 3.9-1.9l.3-.4-.3-.3-1.3-.3Z" fill="#2496ed"/>
+    </symbol>
+    <symbol id="logo-ts" viewBox="0 0 24 24">
+      <rect width="24" height="24" rx="4.5" fill="#3178c6"/>
+      <path d="M13 11.1h5.4v1.65h-1.86v6.1h-1.68v-6.1H13V11.1Zm-1.1 6.35c0 .55-.13 1.02-.4 1.4-.26.37-.63.65-1.1.84-.47.18-1.02.27-1.63.27-.5 0-.98-.05-1.43-.16a3.5 3.5 0 0 1-1.16-.46v-1.84c.37.27.76.47 1.17.6.42.14.82.2 1.2.2.26 0 .47-.02.62-.08a.8.8 0 0 0 .36-.23.54.54 0 0 0 .12-.34c0-.17-.06-.31-.18-.43-.12-.12-.3-.24-.52-.34l-.82-.36c-.5-.21-.9-.44-1.2-.7a2.2 2.2 0 0 1-.64-.83 2.6 2.6 0 0 1-.2-1.06c0-.52.13-.96.4-1.33.26-.37.63-.65 1.1-.84a4.3 4.3 0 0 1 1.6-.28c.5 0 .94.05 1.32.15.38.1.72.23 1.02.4l-.6 1.64a3.3 3.3 0 0 0-.86-.37 2.9 2.9 0 0 0-.82-.12c-.23 0-.4.02-.54.07a.68.68 0 0 0-.32.21.5.5 0 0 0-.1.3c0 .13.04.25.13.35.1.1.24.2.44.3l.9.4c.49.22.88.45 1.17.7.3.25.5.53.64.85.13.32.2.7.2 1.14Z" fill="#fff"/>
+    </symbol>
+    <symbol id="logo-prisma" viewBox="0 0 24 24">
+      <path d="M4.3 16.1 11 2.9c.3-.6 1.2-.5 1.4.1l6 15.6c.2.5-.1 1-.6 1.1l-12.3 2.2c-.6.1-1.1-.5-.9-1.1l.7-4.7Z" fill="none" stroke="#4c51bf" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M11.3 4.6 8 17l8.4-1.5-5.1-10.9Z" fill="#4c51bf" opacity=".9"/>
+    </symbol>
+    <symbol id="logo-express" viewBox="0 0 48 24">
+      <text x="0" y="18" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800" fill="currentColor" letter-spacing="-1">ex</text>
+      <text x="19" y="18" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="400" fill="currentColor" letter-spacing="-1">press</text>
+    </symbol>
+    <symbol id="logo-zod" viewBox="0 0 24 24">
+      <path d="M5 5h14l-3.5 14h-7L5 5Z" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M8.5 8h7l-3.5 7-3.5-7Z" fill="#2563eb" opacity=".85"/>
+    </symbol>
+    <symbol id="logo-jest" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="#c63d14" stroke-width="1.6"/>
+      <circle cx="9" cy="9.5" r="1.4" fill="#c63d14"/><circle cx="15" cy="9.5" r="1.4" fill="#c63d14"/>
+      <path d="M8 14c1.2 1.6 6.8 1.6 8 0" fill="none" stroke="#c63d14" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+<div class="wrap">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <span class="kicker"><span class="dot"></span>Design Document · Healthtech-1 Take-Home</span>
+    <h1 class="title">Resilient form<br>ingestion, by <em>design</em>.</h1>
+    <p class="lead col">A system that takes registration forms from an unreliable provider —
+      duplicates, silent schema changes, the works — and processes them so that nothing is ever
+      lost, nothing is sent twice, and the on-call engineer sleeps through the night.</p>
+
+    <div class="chips">
+      <span class="chip"><svg><use href="#logo-ts"/></svg>TypeScript</span>
+      <span class="chip"><svg><use href="#logo-postgres"/></svg>PostgreSQL</span>
+      <span class="chip"><svg><use href="#logo-prisma"/></svg>Prisma</span>
+      <span class="chip"><svg style="color:var(--express)"><use href="#logo-express"/></svg></span>
+      <span class="chip"><svg><use href="#logo-docker"/></svg>Docker</span>
+      <span class="chip"><svg><use href="#logo-zod"/></svg>Zod</span>
+      <span class="chip"><svg><use href="#logo-jest"/></svg>Jest</span>
+    </div>
+
+    <div class="meta">
+      <span><b>Author</b> &nbsp;Candidate submission</span>
+      <span><b>Pattern</b> &nbsp;Inbox → State machine → Outbox</span>
+      <span><b>Guarantee</b> &nbsp;Exactly-once egress</span>
+    </div>
+  </header>
+
+  <div class="callout" style="margin-top:26px; background:var(--accent-wash); border-left-color:var(--accent)">
+    <svg class="ci"><use href="#i-shield"/></svg>
+    <div>
+      <p style="margin:0 0 7px"><b>For non-engineers — what this guarantees, in plain terms</b></p>
+      <p>Every registration form that arrives is saved straight away, so none is ever lost — even if the
+        provider sends it twice or sends it while the system is busy. Each form is processed once and only
+        once, so a patient's details are never passed on twice. If the provider quietly renames a field or
+        sends an answer we don't recognise, the form is safely set aside instead of dropped, and a person is
+        asked to decide in the <b>Drift Console</b>. Fixing that kind of change takes a single approval in that
+        console — no code changes and no deployments. The system recovers from everyday hiccups by itself and
+        only asks for a human when there is a genuine ambiguity.</p>
+    </div>
+  </div>
+
+  <hr class="rule"/>
+
+  <!-- ===================== PROBLEM ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><div><div class="eyebrow">The real brief</div><h2>What is actually being graded</h2></div></div>
+    <p class="col">The functional endpoint is the easy 20%. The remaining 80% is a resilience story:
+      the provider is explicitly described as untrustworthy, and the three sample forms are
+      deliberate edge-case landmines. The design below is organised around the hard guarantees,
+      not the CRUD.</p>
+
+    <div class="why">
+      <div class="whyc"><div class="wt"><svg><use href="#i-key"/></svg>Idempotency</div>
+        <p>The provider doesn't promise exactly-once delivery. Duplicates must collapse to a single processed form.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-bot"/></svg>Exactly-once egress</div>
+        <p><code>FORM-BOT</code> must never receive the same form twice — enforced at the database, not in app logic.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-shield"/></svg>Schema tolerance</div>
+        <p>Unannounced schema changes must never cause a form to be rejected or dropped.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-retry"/></svg>Self-recovery</div>
+        <p>Flaky downstreams (~5% failure) recover automatically. A human is paged only as a last resort.</p></div>
+    </div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== ARCHITECTURE ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><div><div class="eyebrow">System architecture</div><h2>One pass through the pipeline</h2></div></div>
+    <p class="col">Ingest is <strong>durable and fast</strong>: persist the raw payload, dedupe, acknowledge.
+      All the risky work — transform, geocode, deliver — happens afterwards in a worker that can crash
+      and resume at any point without losing or double-sending a form.</p>
+
+    <div class="band">
+      <div class="scroll" role="group" aria-label="Pipeline architecture diagram">
+        <div class="flow">
+
+          <div class="stage">
+            <div class="node">
+              <div class="nic" style="color:var(--muted)"><svg><use href="#i-cloud"/></svg></div>
+              <div class="nt">Provider</div><div class="ns">untrustworthy · dupes · schema drift</div>
+            </div>
+            <div class="conn"><svg><use href="#i-arrow"/></svg><span class="cl">POST /ingest</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="node hl">
+              <div class="nic" style="color:var(--express)"><svg><use href="#logo-express"/></svg></div>
+              <div class="nt">Ingest API</div><div class="ns">loose validate · return 202</div>
+            </div>
+            <div class="conn"><svg><use href="#i-arrow"/></svg><span class="cl">write raw</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="node db store">
+              <span class="ntag key">dedupe</span>
+              <div class="nic"><svg><use href="#logo-postgres"/></svg></div>
+              <div class="nt">ingested_forms</div><div class="ns">raw JSONB · UNIQUE session_id</div>
+            </div>
+            <div class="conn"><svg><use href="#i-arrow"/></svg><span class="cl">poll PENDING</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="node">
+              <div class="nic" style="color:var(--accent)"><svg><use href="#i-gear"/></svg></div>
+              <div class="nt">Worker</div><div class="ns">state machine · crash-safe</div>
+            </div>
+            <div class="conn"><svg><use href="#i-arrow"/></svg><span class="cl">geocode</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="node">
+              <span class="ntag key">retry</span>
+              <div class="nic" style="color:var(--accent)"><svg><use href="#i-pin"/></svg></div>
+              <div class="nt">Geocoder</div><div class="ns">postcode → lat / lng</div>
+            </div>
+            <div class="conn"><svg><use href="#i-arrow"/></svg><span class="cl">enqueue</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="node db store">
+              <div class="nic"><svg><use href="#logo-postgres"/></svg></div>
+              <div class="nt">outbox</div><div class="ns">UNIQUE (form_id, type)</div>
+            </div>
+            <div class="conn"><svg><use href="#i-split"/></svg><span class="cl">dispatch</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="branchwrap">
+              <div class="node" style="min-height:0">
+                <span class="ntag once">once</span>
+                <div class="nic" style="color:var(--ok)"><svg><use href="#i-bot"/></svg></div>
+                <div class="nt">FORM-BOT</div><div class="ns">exactly-once</div>
+              </div>
+              <div class="node" style="min-height:0">
+                <span class="ntag most">guaranteed</span>
+                <div class="nic" style="color:var(--info)"><svg><use href="#i-mail"/></svg></div>
+                <div class="nt">Email</div><div class="ns">happyforms@bots.com</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="callout"><svg class="ci"><use href="#i-check"/></svg>
+      <p><b>Why this shape.</b> The database — not application code — holds every guarantee.
+      Deduping is a <code>UNIQUE</code> constraint; "never twice" is a <code>UNIQUE</code> constraint;
+      progress is a persisted status. A restart re-reads the truth from Postgres and carries on.
+      This is also exactly the "schema design" the brief asks to see.</p></div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== STATE MACHINE ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><div><div class="eyebrow">Per-form lifecycle</div><h2>A state machine you can crash</h2></div></div>
+    <p class="col">Each form carries a <code>status</code>. Every transition is idempotent and committed
+      before the next begins, so an interrupted form always resumes from where it stopped — never from
+      the start, and never skipping ahead.</p>
+
+    <div class="band tight">
+      <div class="scroll">
+        <div class="track">
+          <span class="st start">PENDING</span>
+          <span class="arr"><svg><use href="#i-arrow-sm"/></svg></span>
+          <span class="st">PROCESSING</span>
+          <span class="arr"><svg><use href="#i-arrow-sm"/></svg></span>
+          <span class="st">TRANSFORMED</span>
+          <span class="arr"><svg><use href="#i-arrow-sm"/></svg></span>
+          <span class="st">GEOCODED</span>
+          <span class="arr"><svg><use href="#i-arrow-sm"/></svg></span>
+          <span class="st">DISPATCHED</span>
+          <span class="arr"><svg><use href="#i-arrow-sm"/></svg></span>
+          <span class="st done">DONE</span>
+        </div>
+        <div class="branch">
+          <span class="bl">data problem (ambiguous / unresolved drift) →</span>
+          <span class="st review">NEEDS_REVIEW</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:0 8px">human decides → replay</span>
+        </div>
+        <div class="branch">
+          <span class="bl">our problem (deterministic bug / unexpected throw) →</span>
+          <span class="st fail">FAILED</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:0 8px">fix code → replay</span>
+        </div>
+      </div>
+    </div>
+    <p class="col" style="margin-top:18px"><code>PROCESSING</code> is a worker lease (claimed via
+      <code>FOR UPDATE SKIP LOCKED</code> + <code>claimed_at</code>) — two workers never grab one form, and
+      a worker that dies mid-flight has its row reclaimed after the lease expires. The two dead-letter
+      states are deliberately split by <em>owner</em>: <code>NEEDS_REVIEW</code> for a human data decision,
+      <code>FAILED</code> for a code fix — both replayable, neither a crash or a dropped form.</p>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== ERD ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><div><div class="eyebrow">Schema design</div><h2>Three tables, every guarantee</h2></div></div>
+    <p class="col">Deliberately small. The constraints do the heavy lifting — they are where correctness lives.</p>
+
+    <div class="band">
+      <div class="erd">
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>ingested_forms</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>session_id <span class="bd uq">unique</span></li>
+            <li>application_reference</li>
+            <li>raw_payload <span class="bd js">jsonb</span></li>
+            <li>payload_hash <span class="bd fk">dedupe</span></li>
+            <li>status · attempts</li>
+            <li>flags <span class="bd js">soft</span></li>
+            <li>claimed_at <span class="bd fk">lease</span></li>
+            <li>next_attempt_at · last_error</li>
+            <li>duplicate_count <span class="bd uq">obs</span></li>
+            <li>last_seen_at · received_at</li>
+          </ul>
+        </div>
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>transformed_forms</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>ingested_form_id <span class="bd fk">fk·uq</span></li>
+            <li>first_name · last_name</li>
+            <li>gender · date_of_birth</li>
+            <li>address_line_1…3</li>
+            <li>postcode · country</li>
+            <li>longitude · latitude</li>
+          </ul>
+        </div>
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>outbox</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>ingested_form_id <span class="bd fk">fk</span></li>
+            <li>type <span class="bd uq">uq pair</span></li>
+            <li>idempotency_key <span class="bd js">dedupe</span></li>
+            <li>status</li>
+            <li>attempts</li>
+            <li>next_attempt_at</li>
+            <li>last_error</li>
+          </ul>
+        </div>
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>form_conflicts</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>ingested_form_id <span class="bd fk">fk</span></li>
+            <li>payload <span class="bd js">jsonb</span></li>
+            <li>payload_hash</li>
+            <li>received_at</li>
+            <li>resolution <span class="bd uq">null|applied|dismissed</span></li>
+            <li>resolved_at</li>
+          </ul>
+        </div>
+      </div>
+      <div class="relnote">
+        <span class="r"><svg style="width:15px;height:15px;color:var(--accent)"><use href="#i-key"/></svg>session_id UNIQUE → ingest dedupe</span>
+        <span class="r"><svg style="width:15px;height:15px;color:var(--ok)"><use href="#i-bot"/></svg>UNIQUE(form_id, type) → one work item</span>
+        <span class="r"><svg style="width:15px;height:15px;color:var(--ok)"><use href="#i-key"/></svg>idempotency_key → one effect at FORM-BOT</span>
+        <span class="r"><svg style="width:15px;height:15px;color:var(--ok)"><use href="#i-check"/></svg>form_conflicts → a redelivery is never silently dropped</span>
+      </div>
+      <p class="band-sub" style="margin:16px 0 0">All timestamps are <code>timestamptz</code> (UTC);
+        <code>date_of_birth</code> is a plain <code>DATE</code> (no zone) to avoid day-shift. <code>flags</code>
+        holds soft, non-blocking warnings; <code>claimed_at</code> is the worker lease.</p>
+
+      <div class="band-title" style="margin:28px 0 4px"><span class="ic"><svg><use href="#i-gear"/></svg></span><h3 style="font-size:17px">Self-healing tables (§9)</h3></div>
+      <p class="band-sub">Added for the drift console + auto-mapping agent — the schema fixes write here.</p>
+      <div class="erd">
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>drift_observations</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>type · field_path <span class="bd uq">uq pair</span></li>
+            <li>observed_shape <span class="bd js">redacted</span></li>
+            <li>count · first/last_seen</li>
+            <li>status</li>
+            <li>suggestion <span class="bd js">jsonb</span></li>
+            <li>confidence · source_engine</li>
+          </ul>
+        </div>
+        <div class="tbl">
+          <div class="th"><svg><use href="#i-db"/></svg>field_mappings</div>
+          <ul>
+            <li>id <span class="bd pk">pk</span></li>
+            <li>kind <span class="bd js">alias|enum|format|route|composite</span></li>
+            <li>source_path · target_path</li>
+            <li>value_map · fallback <span class="bd js">jsonb</span></li>
+            <li>version · active <span class="bd uq">1 active</span></li>
+            <li>observation_id <span class="bd fk">fk</span></li>
+            <li>approved_by · created_at</li>
+            <li>deactivated_at</li>
+          </ul>
+        </div>
+      </div>
+      <div class="relnote">
+        <span class="r"><svg style="width:15px;height:15px;color:var(--accent)"><use href="#i-doc"/></svg>full DDL in <code>schema.sql</code></span>
+        <span class="r"><svg style="width:15px;height:15px;color:var(--ok)"><use href="#i-check"/></svg>field_mappings append-only → reversible &amp; audited</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== GUARANTEES ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><div><div class="eyebrow">Delivery semantics</div><h2>Two destinations, two guarantees</h2></div></div>
+    <p class="col">Honesty about semantics is itself a design decision — and a strong talking point.</p>
+
+    <div class="callout crit"><svg class="ci"><use href="#i-warn"/></svg>
+      <p><b>There is no transactional exactly-once to an external system.</b> You can't atomically commit a
+      DB row <em>and</em> an HTTP side-effect — the <strong>dual-write problem</strong>. So we build it from
+      two honest halves instead of claiming magic.</p></div>
+
+    <div class="gcards">
+      <div class="gcard once">
+        <div class="gh"><span class="gi"><svg><use href="#i-bot"/></svg></span>
+          <div><div class="glabel">Effective exactly-once</div><h4>FORM-BOT</h4></div></div>
+        <p><strong>One work item:</strong> outbox <code>UNIQUE(form_id, 'FORMBOT')</code> — no duplicate intent.
+          <strong>One effect:</strong> we send a stable <code>idempotency_key</code>; FORM-BOT (ours, "never
+          crashes") returns a deterministic ack — <code>accepted</code> vs <code>already-have-it</code>.
+          We mark <code>DELIVERED</code> <em>only on ack</em>; a row stuck in <code>SENDING</code> is re-driven
+          by a <strong>reconciliation sweep</strong> — safe to resend because the key dedupes it.</p>
+      </div>
+      <div class="gcard most">
+        <div class="gh"><span class="gi"><svg><use href="#i-mail"/></svg></span>
+          <div><div class="glabel">At-least-once</div><h4>Confirmation email</h4></div></div>
+        <p>Enqueued the moment <em>transform</em> succeeds — <strong>independent of the FORM-BOT outcome</strong>
+          (the brief gates it on transform, not delivery). Retried with a high cap until it lands. Email has no
+          dedupe handle, so at-least-once is the truthful promise: a duplicate confirmation is harmless; a
+          missing one is not.</p>
+      </div>
+    </div>
+    <div class="callout"><svg class="ci"><use href="#i-retry"/></svg>
+      <p><b>Independent retries.</b> The two outbox rows are dispatched on their own schedules, so a stuck
+      FORM-BOT never blocks the guaranteed email — and vice-versa.</p></div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== DECISIONS ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><div><div class="eyebrow">Decisions &amp; trade-offs</div><h2>Why these, and not those</h2></div></div>
+
+    <h3>Processing model</h3>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Option</th><th>Pros</th><th>Cons</th></tr></thead>
+        <tbody>
+          <tr class="pick"><td class="opt">DB-backed state machine<br>+ polling worker<div class="star"><svg style="width:11px;height:11px"><use href="#i-check"/></svg>chosen</div></td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Zero extra infra; DB holds all state</li><li><svg class="pro"><use href="#i-check"/></svg>Crash-recoverable &amp; trivially testable</li><li><svg class="pro"><use href="#i-check"/></svg>Tells the resilience story cleanly</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Polling latency</li><li><svg class="con"><use href="#i-x"/></svg>Single-process throughput (fine here)</li></ul></td></tr>
+          <tr><td class="opt">Job queue<br>(BullMQ + Redis)</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Built-in retries / backoff / DLQ</li><li><svg class="pro"><use href="#i-check"/></svg>"Production" feel</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Adds Redis to run &amp; justify</li><li><svg class="con"><use href="#i-x"/></svg>Retry state split across stores</li></ul></td></tr>
+          <tr><td class="opt">Synchronous<br>inline handler</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Simplest to write</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Blocks on flaky downstreams</li><li><svg class="con"><use href="#i-x"/></svg>Partial-failure recovery is awkward</li></ul></td></tr>
+          <tr><td class="opt">External broker<br>(Kafka / SQS)</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Scales; shows breadth</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Overkill; high scope risk in 4–5 days</li></ul></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Database</h3>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Option</th><th>Pros</th><th>Cons</th></tr></thead>
+        <tbody>
+          <tr class="pick"><td class="opt">PostgreSQL<div class="star"><svg style="width:11px;height:11px"><use href="#i-check"/></svg>chosen</div></td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Transactions + JSONB + unique constraints</li><li><svg class="pro"><use href="#i-check"/></svg>Richest "schema design" story</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Needs Docker to run</li></ul></td></tr>
+          <tr><td class="opt">SQLite</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Zero infra; trivial for reviewer</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Weaker concurrency &amp; schema story</li></ul></td></tr>
+          <tr><td class="opt">MongoDB</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Schema flexibility fits drift theme</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Weaker uniqueness/txn guarantees — undercuts idempotency</li></ul></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Idempotency key</h3>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Option</th><th>Pros</th><th>Cons</th></tr></thead>
+        <tbody>
+          <tr class="pick"><td class="opt">session_id (UNIQUE)<div class="star"><svg style="width:11px;height:11px"><use href="#i-check"/></svg>chosen</div></td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Natural per-submission UUID</li><li><svg class="pro"><use href="#i-check"/></svg><code>ON CONFLICT DO NOTHING</code> = atomic dedupe</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Assumes provider reuses it on resend</li></ul></td></tr>
+          <tr><td class="opt">application_reference</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Business-level identity</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>May legitimately repeat</li></ul></td></tr>
+          <tr><td class="opt">Content hash</td>
+            <td><ul class="pclist"><li><svg class="pro"><use href="#i-check"/></svg>Catches byte-identical dupes</li></ul></td>
+            <td><ul class="pclist"><li><svg class="con"><use href="#i-x"/></svg>Misses logical dupes after drift; key-order sensitive</li></ul></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>How do we know it's "the same" one?</h3>
+    <p class="col">Sameness is <strong>declared</strong>, not guessed: <code>session_id</code> is the
+      key the provider replays on redelivery. But a reused id carrying <em>different</em> data must not
+      be silently dropped — so we also store a <code>payload_hash</code> and split the conflict three ways.</p>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Same session_id?</th><th>Same payload_hash?</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td class="opt">no</td><td>—</td><td><b>New form</b> → process normally</td></tr>
+          <tr class="pick"><td class="opt">yes</td><td>yes</td><td><b>True duplicate</b> → bump <code>duplicate_count</code>, no reprocess, <code>202</code></td></tr>
+          <tr><td class="opt">yes</td><td>no</td><td><b>Ambiguous</b> — reused id, changed data → <code>NEEDS_REVIEW</code> + <code>ingest.conflict</code>, never dropped</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn"><svg class="ci"><use href="#i-warn"/></svg>
+      <p><b>The assumption, stated.</b> This rests on the provider reusing <code>session_id</code> on
+      resend. The brief says it's badly behaved — so <code>payload_hash</code> is the safety net: it
+      still catches byte-identical replays even if that assumption breaks.</p></div>
+
+    <div class="callout"><svg class="ci"><use href="#i-shield"/></svg>
+      <p><b>Defence in depth.</b> <code>session_id</code> dedupes at the front door; the outbox
+      <code>UNIQUE(form_id, type)</code> is a second, independent lock so FORM-BOT stays exactly-once
+      even if a duplicate ever slips past ingest.</p></div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== TRANSFORM ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">07</span><div><div class="eyebrow">ingested → transformed</div><h2>Where the sample forms bite</h2></div></div>
+    <p class="col">The three example files encode every tricky rule. The transform is a pure, fully-unit-tested
+      function so each of these is pinned by a test.</p>
+
+    <div class="edges">
+      <div class="edge"><span class="efrom">name: "Andy James Smith-Jones"</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto"><b>firstName</b> / <b>lastName</b> split — document the heuristic &amp; its limits</span></div>
+      <div class="edge"><span class="efrom">name: "Smith, John" / "Madonna"</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto"><b>parse-full-name</b> handles comma form, titles, suffixes; its warnings → <b>soft flag</b></span></div>
+      <div class="edge"><span class="efrom">gender: "other" / "nonbinary"</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto">known → <b>"prefer-not-to-say"</b>; unknown drift → coerce + <b>soft flag</b> (keep original), don't block</span></div>
+      <div class="edge"><span class="efrom">date_of_birth: "1990-01-01"</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto">store as <b>DATE</b> (no TZ) — dodges the UTC day-shift; impossible → review</span></div>
+      <div class="edge"><span class="efrom">address: {…}</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto">flatten to <b>addressLine1…3</b>; line 3 optional</span></div>
+      <div class="edge"><span class="efrom">phone_number: "0001" / absent</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto">optional — keep as-is, never block the form</span></div>
+      <div class="edge"><span class="efrom">postcode</span><span class="ea"><svg><use href="#i-arrow-sm"/></svg></span><span class="eto">enrich via geocoder → <b>longitude / latitude</b></span></div>
+    </div>
+
+    <div class="callout warn"><svg class="ci"><use href="#i-warn"/></svg>
+      <p><b>Spotted in the mock.</b> <code>idealpostcodes</code> returns <code>{ longitude: 50.05, latitude: -5.05 }</code>
+      — those look swapped for a UK postcode (50.05 is a latitude). Worth a line in the README and a mention on
+      the Loom; it signals attention to detail.</p></div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== RESILIENCE + TESTS ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">08</span><div><div class="eyebrow">Failure handling</div><h2>Recovery, and how it's proven</h2></div></div>
+
+    <div class="why">
+      <div class="whyc"><div class="wt"><svg><use href="#i-retry"/></svg>We own the retries</div>
+        <p>After the <code>202</code>, every downstream retry is ours — exponential backoff + jitter, persisted
+          <code>attempts</code>/<code>next_attempt_at</code>. The provider only re-drives a failed ingest.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-gear"/></svg>Multi-worker safe</div>
+        <p>Claim via <code>FOR UPDATE SKIP LOCKED</code> + <code>claimed_at</code> lease. No double-grab; a dead
+          worker's row is reclaimed after the lease. Each reclaim bumps <code>attempts</code>.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-shield"/></svg>Poison-message safe</div>
+        <p>Each form runs in its own try/catch — a throw bumps <code>attempts</code> and releases the row; it
+          never crashes the loop or spins forever.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-test"/></svg>Deterministic tests</div>
+        <p>Mock failure rates are injectable (not <code>Math.random()</code>), so resilience is asserted, not hoped for.</p></div>
+    </div>
+
+    <h3>Error taxonomy — retry vs fail fast</h3>
+    <p class="col">Not every failure deserves a retry. Classifying them is what keeps the review queue honest
+      and stops a bug from silently burning the retry budget.</p>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Class</th><th>Examples</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td class="opt">Transient</td><td>downstream 5xx · timeout · DB deadlock</td><td>backoff + retry; cap → <code>NEEDS_REVIEW</code></td></tr>
+          <tr><td class="opt">Permanent</td><td>our bug · 4xx · un-parseable data · unexpected throw</td><td><b>no retry</b> → <code>FAILED</code> fast, keep the stack</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Soft flag vs hard quarantine</h3>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Signal</th><th>Case</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr class="pick"><td class="opt">Soft flag</td><td>coerced gender · lossy name · missing session_id</td><td>process to <code>DONE</code>, note in <code>flags</code> for audit</td></tr>
+          <tr><td class="opt">Hard quarantine</td><td>same-id/different-data · unresolved required field · impossible DOB</td><td>block in <code>NEEDS_REVIEW</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Test coverage</h3>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th>Layer</th><th>What it proves</th></tr></thead>
+        <tbody>
+          <tr><td class="opt">Unit</td><td>Transform against all 3 sample files + missing/renamed fields; idempotency-key derivation; Zod tolerance</td></tr>
+          <tr><td class="opt">Integration</td><td><code>/ingest</code> + real DB: duplicate submission → one row &amp; one FORM-BOT send; full pipeline to DONE</td></tr>
+          <tr><td class="opt">Resilience</td><td>Forced downstream failures → eventual success, bounded retries, exactly-one FORM-BOT delivery, exhausted → NEEDS_REVIEW</td></tr>
+          <tr><td class="opt">Concurrency</td><td>Two workers over one backlog → each form processed once (<code>SKIP LOCKED</code>); retried FORM-BOT send → receiver dedupes on the key</td></tr>
+          <tr><td class="opt">Crash + taxonomy</td><td>Kill mid-pipeline → reclaimed &amp; completed, no double-send; permanent error → <code>FAILED</code> with zero retries; soft flag → <code>DONE</code> with <code>flags</code> set</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== SELF-HEALING ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">09</span><div><div class="eyebrow">Self-healing drift</div><h2>Turn a 3am page into a one-click fix</h2></div></div>
+    <p class="col">The baseline never drops a drifted form — but a recurring schema change shouldn't stay
+      a standing incident. This layer records every mismatch, groups it, and hands on-call a
+      <strong>suggested mapping</strong> to approve — including an N→1 <code>composite</code> suggestion
+      when a provider splits one field into several (<code>firstName</code>+<code>lastName</code> instead
+      of <code>name</code>), which a 1→1 rename would otherwise answer by silently dropping the second
+      field. Approving writes a versioned DB mapping (hot-reloaded, no deploy) and replays the blocked
+      forms. When nothing scores confidently, the operator is never stuck: they map the form's real
+      fields by hand, save-or-skip.</p>
+
+    <div class="band">
+      <div class="scroll" role="group" aria-label="Self-healing loop">
+        <div class="flow">
+          <div class="stage"><div class="node"><div class="nic" style="color:var(--accent)"><svg><use href="#i-layers"/></svg></div><div class="nt">Observe</div><div class="ns">drift_observations · grouped</div></div><div class="conn"><svg><use href="#i-arrow"/></svg></div></div>
+          <div class="stage"><div class="node"><div class="nic" style="color:var(--accent)"><svg><use href="#i-gear"/></svg></div><div class="nt">Suggest</div><div class="ns">rule + Claude fallback</div></div><div class="conn"><svg><use href="#i-arrow"/></svg></div></div>
+          <div class="stage"><div class="node hl"><span class="ntag key">human</span><div class="nic" style="color:var(--accent)"><svg><use href="#i-doc"/></svg></div><div class="nt">Review</div><div class="ns">approve · edit · dismiss</div></div><div class="conn"><svg><use href="#i-arrow"/></svg></div></div>
+          <div class="stage"><div class="node"><span class="ntag once">agent</span><div class="nic" style="color:var(--ok)"><svg><use href="#i-bot"/></svg></div><div class="nt">Apply</div><div class="ns">field_mappings · versioned</div></div><div class="conn"><svg><use href="#i-arrow"/></svg></div></div>
+          <div class="stage"><div class="node"><div class="nic" style="color:var(--accent)"><svg><use href="#i-retry"/></svg></div><div class="nt">Replay</div><div class="ns">idempotent → DONE</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout"><svg class="ci"><use href="#i-shield"/></svg>
+      <p><b>Guardrails.</b> Nothing acts without an approved suggestion <i>except</i> the two curated
+      built-in composites (<code>firstName</code>+<code>lastName</code> → <code>name</code>, and the
+      snake_case equivalent) — a composite otherwise never auto-applies, since join-vs-alternatives
+      can't be settled from field names alone. Mappings are versioned &amp; reversible (roll back =
+      deactivate + re-replay); no PII leaves the trust boundary for drift observations (redacted
+      shapes/exemplars only — the one deliberate exception is the operator-only hand-mapping and
+      conflict-resolution views, which show the real payload because an authorized human reconciling
+      a specific stuck form needs to see it); replay is idempotent.</p></div>
+
+    <div class="callout"><svg class="ci"><use href="#i-doc"/></svg>
+      <p><b>Built, not a mockup:</b> the review/approve flow, hand-mapping, and conflict resolution all
+      run in a real operator console (<code>../healthtech-ingestion-ui</code>), wired to the live API —
+      every action it takes is a plain endpoint listed in <code>/docs</code>. The static design mockup
+      that inspired its visual language is still available for reference —
+      <a href="https://claude.ai/code/artifact/0a95288e-f679-4f7d-8067-d33c2848d33b">open it →</a></p></div>
+  </section>
+
+  <hr class="rule"/>
+
+  <!-- ===================== SCOPE / FUTURE ===================== -->
+  <section>
+    <div class="sec-head"><span class="sec-num">10</span><div><div class="eyebrow">Scope &amp; honesty</div><h2>What's in, and what I'd do next</h2></div></div>
+    <div class="why">
+      <div class="whyc"><div class="wt"><svg><use href="#i-check"/></svg>In scope now</div>
+        <p>Durable ingest, dedupe, transform, geocode-with-retry, outbox dispatch, both delivery guarantees,
+          schema tolerance, and the three test layers — plus a working operator console wired to all of it:
+          drift review + approve/dismiss, the mapping registry (including N→1 <code>composite</code> rules),
+          dead-letter replay, hand-mapping a stuck form with no confident suggestion, and resolving a
+          same-session payload conflict without ever dropping the disputed data.</p></div>
+      <div class="whyc"><div class="wt"><svg><use href="#i-scale"/></svg>With more time</div>
+        <p>The LLM (Claude) fallback for drift suggestions the rule engine scores low — the one genuinely
+          unbuilt piece of §9 — plus BullMQ for higher throughput, PII-at-rest encryption, a richer
+          per-form timeline trace, and a real geocoding provider.</p></div>
+    </div>
+    <div class="callout"><svg class="ci"><use href="#i-doc"/></svg>
+      <p><b>PHI note.</b> This is healthcare data — payloads are never logged in full, secrets come from env
+      (<code>.env.example</code> provided), and at-rest/TLS handling is called out as considered-but-out-of-scope for the exercise.</p></div>
+  </section>
+
+  <footer>
+    <p>Healthtech-1 take-home · design document · companion to <code>PLAN.md</code> in the repository.
+      Rendered with inline SVG diagrams — no external assets. Toggle light/dark with your viewer's theme control.</p>
+  </footer>
+
+</div>
+</div>

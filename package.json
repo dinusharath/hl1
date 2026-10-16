@@ -1,0 +1,39 @@
+{
+  "name": "take-home-test",
+  "version": "1.0.0",
+  "description": "Resilient healthcare form ingestion",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "worker": "ts-node-dev --respawn src/worker/worker.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.5.0",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "prisma": "^5.22.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "express": "^4.21.2",
+    "parse-full-name": "^1.2.6",
+    "pino": "^9.4.0",
+    "zod": "^3.23.8"
+  }
+}

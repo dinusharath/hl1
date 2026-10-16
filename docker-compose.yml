@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: healthtech_ingestion_db
+    environment:
+      POSTGRES_USER: ingestion
+      POSTGRES_PASSWORD: ingestion
+      POSTGRES_DB: ingestion
+    ports:
+      # Host port is overridable (set DB_PORT) for machines already running Postgres on 5432.
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ingestion"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

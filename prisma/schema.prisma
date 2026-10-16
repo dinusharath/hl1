@@ -1,0 +1,190 @@
+// Prisma schema — see schema.sql for the annotated DDL and PLAN.md §4/§10 for rationale.
+// All timestamps are stored UTC; date_of_birth is a date-only column (no timezone).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Lifecycle of an ingested form through the pipeline.
+enum FormStatus {
+  PENDING
+  PROCESSING
+  TRANSFORMED
+  GEOCODED
+  DISPATCHED
+  DONE
+  NEEDS_REVIEW // data problem — a human decides, then replay
+  FAILED // our problem — a deterministic bug; fix code, then replay
+}
+
+enum OutboxType {
+  FORMBOT
+  EMAIL
+}
+
+enum OutboxStatus {
+  PENDING
+  SENDING
+  DELIVERED
+  FAILED
+}
+
+/// Durable inbox. Raw payload lands here first; dedupe + observability live here.
+model IngestedForm {
+  id                   String    @id @default(uuid())
+  sessionId            String?   @unique @map("session_id") // idempotency key; nullable-safe for drift
+  applicationReference String?   @map("application_reference")
+  rawPayload           Json      @map("raw_payload") // stored untouched — never lose data
+  payloadHash          String    @map("payload_hash") // disambiguates same-id/different-data
+  status               FormStatus @default(PENDING)
+  flags                Json      @default("[]") // soft, non-blocking warnings
+  attempts             Int       @default(0)
+  lastError            String?   @map("last_error")
+  claimedAt            DateTime? @map("claimed_at") // worker lease
+  nextAttemptAt        DateTime  @default(now()) @map("next_attempt_at")
+  duplicateCount       Int       @default(0) @map("duplicate_count") // observed redeliveries
+  lastSeenAt           DateTime  @default(now()) @map("last_seen_at")
+  receivedAt           DateTime  @default(now()) @map("received_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  transformed TransformedForm?
+  outbox      OutboxMessage[]
+  conflicts   FormConflict[]
+
+  @@index([status, nextAttemptAt], name: "ingested_claimable")
+  @@map("ingested_forms")
+}
+
+/// A session_id reused with different data. The original row is never overwritten or reprocessed
+/// (so a completed delivery is never silently redone) — but the conflicting payload is never
+/// dropped either: it lands here for a human to inspect and, if it's the real correction, apply.
+model FormConflict {
+  id             String    @id @default(uuid())
+  ingestedFormId String    @map("ingested_form_id")
+  payload        Json // the conflicting payload, stored untouched — never lose data
+  payloadHash    String    @map("payload_hash")
+  receivedAt     DateTime  @default(now()) @map("received_at")
+  resolution     String?   // null = pending; "applied" | "dismissed"
+  resolvedAt     DateTime? @map("resolved_at")
+
+  form IngestedForm @relation(fields: [ingestedFormId], references: [id])
+
+  @@index([ingestedFormId, resolution], name: "conflict_pending")
+  @@map("form_conflicts")
+}
+
+/// Transformed output — exactly one per ingested form (upsert → transform is idempotent).
+model TransformedForm {
+  id             String   @id @default(uuid())
+  ingestedFormId String   @unique @map("ingested_form_id")
+  firstName      String   @map("first_name")
+  lastName       String   @map("last_name")
+  email          String
+  gender         String // male | female | prefer-not-to-say
+  dateOfBirth    DateTime @map("date_of_birth") @db.Date // date-only, no TZ
+  phoneNumber    String?  @map("phone_number")
+  mobileNumber   String   @map("mobile_number")
+  addressLine1   String   @map("address_line_1")
+  addressLine2   String   @map("address_line_2")
+  addressLine3   String?  @map("address_line_3")
+  postcode       String
+  country        String
+  longitude      Float? // nullable until geocoded
+  latitude       Float?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  ingestedForm IngestedForm @relation(fields: [ingestedFormId], references: [id], onDelete: Cascade)
+
+  @@map("transformed_forms")
+}
+
+/// Transactional outbox. One row per (form, destination) → one work item.
+model OutboxMessage {
+  id             String       @id @default(uuid())
+  ingestedFormId String       @map("ingested_form_id")
+  type           OutboxType
+  idempotencyKey String       @map("idempotency_key") // receiver dedupes on this → one effect
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime     @default(now()) @map("next_attempt_at")
+  lastError      String?      @map("last_error")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  ingestedForm IngestedForm @relation(fields: [ingestedFormId], references: [id], onDelete: Cascade)
+
+  @@unique([ingestedFormId, type])
+  @@index([status, nextAttemptAt], name: "outbox_dispatchable")
+  @@map("outbox")
+}
+
+// --- Self-healing schema drift (§10) ---
+
+/// One row per ISSUE (not per form). Feeds the on-call drift console.
+model DriftObservation {
+  id            String   @id @default(uuid())
+  type          String // unknown_field | missing_field | likely_rename | unmapped_enum | format_change | structural
+  fieldPath     String   @map("field_path")
+  observedShape Json?    @map("observed_shape") // REDACTED shape/exemplar — never raw PII
+  expected      String?
+  sampleFormIds String[] @map("sample_form_ids")
+  count         BigInt   @default(1)
+  firstSeen     DateTime @default(now()) @map("first_seen")
+  lastSeen      DateTime @default(now()) @map("last_seen")
+  status        String   @default("new") // new | suggested | approved | applied | dismissed
+  suggestion    Json?
+  confidence    Decimal? @db.Decimal(4, 3)
+  sourceEngine  String?  @map("source_engine")
+
+  mappings     FieldMapping[]
+  countedForms DriftObservationForm[]
+
+  @@unique([type, fieldPath])
+  @@map("drift_observations")
+}
+
+/// Every DISTINCT form that has hit a given drift observation — the true, uncapped membership.
+/// `drift_observations.sample_form_ids` stays capped (display/sample only); this table is what
+/// makes `count` accurate past the cap and lets Approve replay every affected form, not just a
+/// sample. The composite PK is also the idempotency guard: a form retried mid-pipeline calls
+/// recordFromForm again, but INSERT ... ON CONFLICT DO NOTHING means it is only ever counted once.
+model DriftObservationForm {
+  observationId  String   @map("observation_id")
+  ingestedFormId String   @map("ingested_form_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  observation DriftObservation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@id([observationId, ingestedFormId])
+  @@map("drift_observation_forms")
+}
+
+/// Mappings applied by the agent on approval. Append-only + version + active → reversible & audited.
+model FieldMapping {
+  id            String    @id @default(uuid())
+  kind          String // alias | enum | format | route
+  sourcePath    String    @map("source_path")
+  targetPath    String?   @map("target_path")
+  valueMap      Json?     @map("value_map")
+  fallback      Json      @default("[]")
+  priority      Int       @default(100)
+  scope         String    @default("all") // all | future
+  version       Int
+  active        Boolean   @default(true)
+  confidence    Decimal?  @db.Decimal(4, 3)
+  sourceEngine  String?   @map("source_engine")
+  observationId String?   @map("observation_id")
+  approvedBy    String    @map("approved_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  deactivatedAt DateTime? @map("deactivated_at")
+
+  observation DriftObservation? @relation(fields: [observationId], references: [id])
+
+  @@map("field_mappings")
+}
+
+/// Replay jobs — queued when a mapping is approved (scope=all) or a human hits "replay".

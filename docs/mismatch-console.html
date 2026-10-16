@@ -1,0 +1,481 @@
+<title>Drift Console — On-call</title>
+<style>
+  :root{
+    --bg:#eceff0; --surface:#ffffff; --surface-2:#f4f7f7; --surface-3:#e9eeee; --border:#d8e0e0; --border-strong:#c3cfcf;
+    --ink:#0d1b1e; --ink-soft:#35494e; --muted:#687c80; --accent:#0f766e; --accent-bright:#0d9488; --accent-wash:#d8efec;
+    --ok:#15803d; --ok-wash:#dcf3e4; --warn:#b45309; --warn-wash:#fbeacb; --info:#1d4ed8; --info-wash:#dbe6fe;
+    --crit:#be123c; --crit-wash:#fbdde4; --violet:#6d28d9; --violet-wash:#ece4fb;
+    --shadow:0 1px 2px rgba(13,27,30,.05), 0 10px 30px -18px rgba(13,27,30,.3);
+    --shadow-lg:0 2px 12px rgba(13,27,30,.1), 0 30px 70px -30px rgba(13,27,30,.4);
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0a1316; --surface:#111d21; --surface-2:#16242a; --surface-3:#1d2f35; --border:#223036; --border-strong:#2c3f47;
+    --ink:#e8f0f0; --ink-soft:#bcccce; --muted:#8aa0a3; --accent:#2dd4bf; --accent-bright:#5eead4; --accent-wash:#123733;
+    --ok:#4ade80; --ok-wash:#0f2f1d; --warn:#fbbf24; --warn-wash:#36260a; --info:#60a5fa; --info-wash:#112442;
+    --crit:#fb7185; --crit-wash:#39131d; --violet:#c4b5fd; --violet-wash:#241a42;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -20px rgba(0,0,0,.7); --shadow-lg:0 2px 14px rgba(0,0,0,.55), 0 36px 80px -34px rgba(0,0,0,.85);
+  }}
+  :root[data-theme="light"]{--bg:#eceff0;--surface:#ffffff;--surface-2:#f4f7f7;--surface-3:#e9eeee;--border:#d8e0e0;--border-strong:#c3cfcf;--ink:#0d1b1e;--ink-soft:#35494e;--muted:#687c80;--accent:#0f766e;--accent-bright:#0d9488;--accent-wash:#d8efec;--ok:#15803d;--ok-wash:#dcf3e4;--warn:#b45309;--warn-wash:#fbeacb;--info:#1d4ed8;--info-wash:#dbe6fe;--crit:#be123c;--crit-wash:#fbdde4;--violet:#6d28d9;--violet-wash:#ece4fb;}
+  :root[data-theme="dark"]{--bg:#0a1316;--surface:#111d21;--surface-2:#16242a;--surface-3:#1d2f35;--border:#223036;--border-strong:#2c3f47;--ink:#e8f0f0;--ink-soft:#bcccce;--muted:#8aa0a3;--accent:#2dd4bf;--accent-bright:#5eead4;--accent-wash:#123733;--ok:#4ade80;--ok-wash:#0f2f1d;--warn:#fbbf24;--warn-wash:#36260a;--info:#60a5fa;--info-wash:#112442;--crit:#fb7185;--crit-wash:#39131d;--violet:#c4b5fd;--violet-wash:#241a42;}
+  *{box-sizing:border-box} body{margin:0}
+  .app{background:var(--bg); color:var(--ink); font-family:var(--sans); min-height:100vh; font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased}
+  .app ::selection{background:var(--accent-wash)}
+
+  .topbar{border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:4}
+  .topbar .in{max-width:900px; margin:0 auto; padding:13px 24px; display:flex; align-items:center; gap:12px}
+  .logo{display:flex; align-items:center; gap:10px; font-weight:700; font-size:16px}
+  .logo .mk{width:30px;height:30px;border-radius:9px;background:var(--accent-wash);color:var(--accent);display:grid;place-items:center}
+  .logo .mk svg{width:18px;height:18px}
+  .newbtn{margin-left:auto; font:inherit; font-size:13.5px; font-weight:600; color:#fff; background:var(--accent); border:1px solid var(--accent); border-radius:9px; padding:8px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:var(--shadow)}
+  .newbtn svg{width:16px;height:16px}
+
+  .wrap{max-width:900px; margin:0 auto; padding:24px 24px 70px}
+  h1{font-size:21px; letter-spacing:-.02em; margin:0 0 4px}
+  .sub{color:var(--muted); font-size:14px; margin:0 0 18px}
+
+  .tabs{display:flex; gap:0; border-bottom:1px solid var(--border); margin:4px 0 22px}
+  .tab{font:inherit; font-size:14px; font-weight:600; color:var(--muted); background:transparent; border:0; border-bottom:2px solid transparent; padding:10px 2px; margin-right:22px; cursor:pointer}
+  .tab.on{color:var(--accent); border-bottom-color:var(--accent)}
+  .tab .n{font-family:var(--mono); font-size:12px; color:var(--muted); margin-left:6px}
+  .tab.on .n{color:var(--accent)}
+
+  /* Metrics strip */
+  .metrics{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:18px}
+  @media(max-width:620px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  .metric{border:1px solid var(--border); border-radius:11px; background:var(--surface); padding:12px 14px; cursor:pointer; box-shadow:var(--shadow)}
+  .metric.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-wash), var(--shadow)}
+  .metric .v{font-size:22px; font-weight:750; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .metric .k{font-size:11.5px; color:var(--muted); margin-top:1px}
+  .metric.ok .v{color:var(--ok)} .metric.warn .v{color:var(--warn)} .metric.crit .v{color:var(--crit)} .metric.info .v{color:var(--info)}
+
+  /* Filter bar */
+  .filters{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap}
+  .search{flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:8px 12px}
+  .search svg{width:16px;height:16px;color:var(--muted);flex:0 0 auto}
+  .search input{font:inherit; font-size:14px; border:0; background:transparent; color:var(--ink); width:100%; outline:none}
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .fchip{font:inherit; font-size:12.5px; font-weight:600; color:var(--ink-soft); background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:6px 12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px}
+  .fchip.on{background:var(--accent); border-color:var(--accent); color:#fff}
+  .fchip .c{font-family:var(--mono); font-size:11px; opacity:.8}
+
+  /* Lists / cards */
+  .list{display:flex; flex-direction:column; gap:14px}
+  .item{border:1px solid var(--border); border-radius:13px; background:var(--surface); box-shadow:var(--shadow); overflow:hidden}
+  .item.resolved{opacity:.6}
+  .rowhead{display:flex; align-items:center; gap:13px; padding:14px 18px}
+  .rowhead.link{cursor:pointer} .rowhead.link:hover{background:var(--surface-2)}
+  .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:var(--border-strong)}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)} .dot.info{background:var(--info)}
+  .main{min-width:0;flex:1}
+  .title{font-weight:600; font-size:15px; color:var(--ink); line-height:1.3}
+  .meta{font-size:12.5px; color:var(--muted); margin-top:2px; font-family:var(--mono)}
+  .meta b{color:var(--ink-soft)}
+
+  .pill{font-family:var(--mono); font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; white-space:nowrap; letter-spacing:.02em}
+  .pill.done{background:var(--ok-wash); color:var(--ok)} .pill.review{background:var(--warn-wash); color:var(--warn)}
+  .pill.failed{background:var(--crit-wash); color:var(--crit)} .pill.prog{background:var(--info-wash); color:var(--info)}
+
+  /* Confidence meter (review tab) */
+  .gauge{flex:0 0 auto; min-width:150px; text-align:right}
+  @media(max-width:560px){.gauge{min-width:120px}}
+  .gauge .track{height:8px; border-radius:999px; overflow:hidden; margin-bottom:5px; border:1px solid transparent}
+  .gauge .fill{height:100%; border-radius:999px}
+  .gauge.high .track{background:color-mix(in srgb,var(--ok),transparent 80%); border-color:color-mix(in srgb,var(--ok),transparent 60%)}
+  .gauge.mid .track{background:color-mix(in srgb,var(--warn),transparent 80%); border-color:color-mix(in srgb,var(--warn),transparent 60%)}
+  .gauge.high .fill{background:linear-gradient(90deg,var(--ok),#34d399)} .gauge.mid .fill{background:linear-gradient(90deg,var(--warn),#f59e0b)}
+  .gauge .gtext{font-size:11.5px; color:var(--muted); white-space:nowrap}
+  .gauge .gtext b{font-size:14px; font-variant-numeric:tabular-nums; margin-right:4px}
+  .gauge.high .gtext b{color:var(--ok)} .gauge.mid .gtext b{color:var(--warn)}
+
+  .detail-static{padding:16px 18px 16px 41px; border-top:1px solid var(--border); background:color-mix(in srgb,var(--surface-2),transparent 40%)}
+  @media(max-width:560px){.detail-static{padding:14px 16px}}
+
+  /* Mapping chips */
+  .map{display:flex; flex-direction:column; gap:11px}
+  .maprow{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .maplabel{font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); flex:0 0 92px}
+  .chip{font-family:var(--mono); font-size:13px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); white-space:nowrap}
+  .chip.gone{color:var(--crit); border-color:color-mix(in srgb,var(--warn),var(--border)); background:var(--warn-wash); text-decoration:line-through}
+  .chip.arrived{color:var(--ink); border-color:var(--border-strong)} .chip.val{color:var(--ink); border-color:var(--border-strong)}
+  .chip.target{color:var(--ok); border-color:color-mix(in srgb,var(--ok),var(--border)); background:var(--ok-wash); font-weight:650}
+  .arrow{color:var(--muted); display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:var(--mono)} .arrow svg{width:22px;height:14px}
+  .maphint{font-size:12px; color:var(--muted); font-family:var(--mono)}
+
+  .actions{display:flex; align-items:center; gap:8px; margin-top:14px; padding-top:13px; border-top:1px solid var(--border); flex-wrap:wrap}
+  .btn{font:inherit; font-size:13px; font-weight:600; border-radius:8px; padding:7px 13px; cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--ink-soft); display:inline-flex; align-items:center; gap:6px}
+  .btn svg{width:15px;height:15px}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff; box-shadow:var(--shadow)}
+  .btn.ghost{background:transparent; border-color:transparent; color:var(--muted); margin-left:auto}
+  .consequence{font-size:12.5px; color:var(--muted); margin-top:11px; line-height:1.5}
+  .srctag{font-family:var(--mono); font-size:10.5px; padding:3px 9px; border-radius:6px; font-weight:600; background:var(--surface-3); color:var(--muted)}
+  details.tech{margin-top:13px} details.tech summary{cursor:pointer; font-size:12.5px; color:var(--muted); font-family:var(--mono)}
+  details.tech .box{margin-top:9px; background:var(--surface-3); border:1px solid var(--border); border-radius:9px; padding:11px 13px; font-family:var(--mono); font-size:11.5px; color:var(--ink-soft); overflow-x:auto; white-space:pre-wrap}
+  .reason{font-size:13px; color:var(--ink-soft); margin:0 0 4px} .reason b{color:var(--crit)}
+
+  .pager{display:flex; align-items:center; justify-content:center; gap:10px; margin-top:16px}
+  .pager button{font:inherit; font-size:13.5px; color:var(--ink-soft); background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:8px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px}
+  .pager button:disabled{color:var(--border-strong); cursor:default} .pager button svg{width:15px;height:15px}
+  .pager .of{font-family:var(--mono); font-size:12.5px; color:var(--muted)}
+  .empty{text-align:center; padding:44px 24px; color:var(--muted)}
+  .overall{display:flex; align-items:center; gap:12px; margin:0 0 18px}
+  .overall .track{flex:1; max-width:440px; height:9px; border-radius:999px; overflow:hidden; background:color-mix(in srgb,var(--accent),transparent 82%); border:1px solid color-mix(in srgb,var(--accent),transparent 62%)}
+  .overall .fill{height:100%; border-radius:999px; background:linear-gradient(90deg,var(--accent),var(--accent-bright)); transition:width .35s}
+  .overall .txt{font-family:var(--mono); font-size:12.5px; color:var(--muted)} .overall .txt b{color:var(--ink)}
+
+  /* New-mapping form */
+  .form{border:1px solid var(--accent); background:var(--surface); border-radius:13px; padding:20px; margin-bottom:16px; box-shadow:var(--shadow)}
+  .form h3{margin:0 0 14px; font-size:16px}
+  .form .two{display:flex; gap:12px; flex-wrap:wrap} .form .two > div{flex:1; min-width:170px}
+  .form label.fl{display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px}
+  .form input[type=text], .form select{font:inherit; font-size:14px; padding:9px 11px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--ink); width:100%}
+  .form .scope{display:flex; gap:14px; font-size:13.5px; margin-top:5px} .form .scope label{display:inline-flex; align-items:center; gap:7px; color:var(--ink-soft); cursor:pointer}
+  .form .formactions{display:flex; gap:9px; margin-top:16px; padding-top:13px; border-top:1px solid var(--border)}
+  .amap .ammeta{font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:2px}
+  .badge-active{font-family:var(--mono); font-size:11px; font-weight:600; color:var(--ok); background:color-mix(in srgb,var(--ok),transparent 86%); border:1px solid color-mix(in srgb,var(--ok),transparent 70%); padding:2px 9px; border-radius:999px; white-space:nowrap}
+
+  /* Detail drawer */
+  .scrim{position:fixed; inset:0; background:rgba(5,15,18,.45); backdrop-filter:blur(2px); z-index:9; opacity:0; pointer-events:none; transition:opacity .2s}
+  .scrim.show{opacity:1; pointer-events:auto}
+  .drawer{position:fixed; top:0; right:0; height:100%; width:min(520px,100%); background:var(--bg); border-left:1px solid var(--border); box-shadow:var(--shadow-lg); z-index:10; transform:translateX(100%); transition:transform .22s ease; overflow-y:auto}
+  .drawer.show{transform:none}
+  .dh{position:sticky; top:0; background:var(--surface); border-bottom:1px solid var(--border); padding:16px 20px; display:flex; align-items:center; gap:12px}
+  .dh .back{font:inherit; font-size:14px; color:var(--ink-soft); background:transparent; border:0; cursor:pointer; display:inline-flex; align-items:center; gap:6px} .dh .back svg{width:16px;height:16px}
+  .db{padding:20px}
+  .db h2{margin:0 0 3px; font-size:18px} .db .did{font-family:var(--mono); font-size:12px; color:var(--muted); margin-bottom:16px; word-break:break-all}
+  .statusline{display:flex; align-items:center; gap:10px; margin-bottom:6px}
+  .statusmsg{font-size:13.5px; color:var(--ink-soft); margin:0 0 18px}
+  .sec{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:20px 0 10px}
+  .tl{list-style:none; margin:0; padding:0; position:relative}
+  .tl::before{content:""; position:absolute; left:7px; top:4px; bottom:12px; width:2px; background:var(--border)}
+  .tl li{position:relative; padding:0 0 14px 26px; font-size:13.5px}
+  .tl li .d{position:absolute; left:1px; top:2px; width:13px;height:13px;border-radius:50%;border:3px solid var(--bg); background:var(--ok); box-shadow:0 0 0 1.5px var(--ok)}
+  .tl li.pending .d{background:var(--border-strong); box-shadow:0 0 0 1.5px var(--border-strong)}
+  .tl li.warn .d{background:var(--warn); box-shadow:0 0 0 1.5px var(--warn)}
+  .tl li.crit .d{background:var(--crit); box-shadow:0 0 0 1.5px var(--crit)}
+  .tl li .st{font-family:var(--mono); font-weight:650; color:var(--ink)} .tl li.pending .st{color:var(--muted)}
+  .tl li .tm{font-family:var(--mono); font-size:11.5px; color:var(--muted)}
+  .kv{display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13.5px}
+  .kv .k{color:var(--muted)} .kv .v{font-family:var(--mono); color:var(--ink-soft); text-align:right}
+  .flagrow{display:flex; gap:8px; align-items:flex-start; font-size:13px; color:var(--ink-soft); padding:6px 0}
+  .flagrow .fc{font-family:var(--mono); font-size:11px; color:var(--warn); background:var(--warn-wash); border:1px solid color-mix(in srgb,var(--warn),var(--border)); padding:2px 7px; border-radius:6px; white-space:nowrap}
+  .errbox{background:var(--crit-wash); border:1px solid color-mix(in srgb,var(--crit),var(--border)); color:var(--crit); border-radius:9px; padding:11px 13px; font-family:var(--mono); font-size:12px; margin-top:4px}
+  .drawer .actions{border-top:1px solid var(--border); margin-top:22px}
+  .redtag{font-family:var(--mono); font-size:10px; font-weight:600; color:var(--muted); background:var(--surface-3); border:1px solid var(--border); padding:2px 7px; border-radius:6px; text-transform:none; letter-spacing:0; margin-left:8px; vertical-align:middle}
+  .datanote{font-size:12px; color:var(--muted); margin:0 0 8px}
+  .kv .v.masked{color:var(--muted)}
+  .revealbtn{float:right; font:inherit; font-size:11px; font-weight:600; color:var(--accent); background:transparent; border:1px solid color-mix(in srgb,var(--accent),var(--border)); border-radius:7px; padding:3px 9px; cursor:pointer; text-transform:none; letter-spacing:0}
+  .auditnote{font-size:12px; color:var(--warn); background:var(--warn-wash); border:1px solid color-mix(in srgb,var(--warn),var(--border)); border-radius:8px; padding:8px 11px; margin:0 0 10px}
+
+  .footnote{max-width:900px; margin:0 auto; padding:0 24px 40px; color:var(--muted); font-size:12.5px; line-height:1.5}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-wand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m5 19 9-9"/><path d="m14.5 5.5 4 4"/><path d="M15 3.5 15.8 5l1.5.8-1.5.8L15 8l-.8-1.5L12.7 5.8 14.2 5 15 3.5Z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 6.5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m14 6 4 4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-arr" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h20m-6-5 6 5-6 5"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-1.3 5"/><path d="M20 4.5V10h-5.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></symbol>
+</defs></svg>
+
+<div class="app">
+  <div class="topbar"><div class="in">
+    <div class="logo"><span class="mk"><svg><use href="#i-wand"/></svg></span>Drift Console</div>
+    <button class="newbtn" onclick="openNew()"><svg><use href="#i-plus"/></svg>New mapping</button>
+  </div></div>
+  <div style="background:#fff7ed;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:12.5px;padding:7px 20px;text-align:center">
+    Visual design mockup with sample data — the rule-based suggestion engine shown here is real and unit-tested; the "Claude" source tag and these specific numbers/percentages are illustrative, not a live integration.
+  </div>
+
+  <div class="wrap">
+    <div class="tabs">
+      <button class="tab on" id="tabReview" onclick="switchTab('review')">To review<span class="n" id="nReview"></span></button>
+      <button class="tab" id="tabForms" onclick="switchTab('forms')">Forms<span class="n" id="nForms"></span></button>
+      <button class="tab" id="tabApplied" onclick="switchTab('applied')">Applied<span class="n" id="nApplied"></span></button>
+    </div>
+    <div id="view"></div>
+  </div>
+
+  <div class="footnote">Approving or replaying is reversible and audited; it re-runs the affected forms automatically with no deploy. Values shown are redacted — no personal data leaves this system.</div>
+</div>
+
+<div class="scrim" id="scrim" onclick="closeDetail()"></div>
+<div class="drawer" id="drawer"></div>
+
+<script>
+  const TYPES = { rename:"A field stopped arriving", enum:"A new value we don't recognise", format:"A format changed" };
+  const confClass = c => c >= 85 ? "high" : "mid";
+  const confWord  = c => c >= 85 ? "Very likely correct" : "Worth a check";
+  const arrowWord = m => m.vmap ? "becomes" : "fills";
+
+  // ---- Review: drift issues ----
+  const issues = [
+    { type:"rename", title:"The Email field is missing", count:10284, gone:"email", arrived:["work_email","home_email"], from:"work_email", to:"Email", backup:"home_email", confidence:92, src:"rule" },
+    { type:"enum", title:"Unknown gender value “nonbinary”", count:1517, vmap:true, field:"gender", arrived:["nonbinary"], from:"nonbinary", to:"prefer-not-to-say", confidence:74, src:"llm" },
+    { type:"format", title:"Date of birth format changed", count:605, vmap:true, field:"date_of_birth", arrived:["14/03/1990"], from:"14/03/1990", to:"1990-03-14", confidence:88, src:"rule" },
+    { type:"rename", title:"Mobile arriving as “mobile”", count:4210, gone:"mobile_number", arrived:["mobile"], from:"mobile", to:"Mobile number", confidence:96, src:"rule" },
+    { type:"enum", title:"Unknown gender value “M”", count:892, vmap:true, field:"gender", arrived:["M"], from:"M", to:"male", confidence:91, src:"rule" },
+    { type:"rename", title:"New “county” field", count:333, arrived:["county"], from:"county", to:"Address line 3", confidence:81, src:"llm" },
+    { type:"format", title:"Phone includes country code", count:1740, vmap:true, field:"phone_number", arrived:["+44 7700 900123"], from:"+44 7700 900123", to:"07700 900123", confidence:79, src:"llm" },
+    { type:"rename", title:"“given_name” instead of name", count:502, arrived:["given_name"], from:"given_name", to:"First name", confidence:84, src:"rule" },
+    { type:"enum", title:"Unknown gender value “F”", count:770, vmap:true, field:"gender", arrived:["F"], from:"F", to:"female", confidence:91, src:"rule" },
+  ];
+  const resolvedI = new Array(issues.length).fill(false);
+
+  // ---- Forms ----
+  const STATUS = {
+    PENDING:{cls:"prog",dot:"info",msg:"In progress — queued, nothing to do."},
+    PROCESSING:{cls:"prog",dot:"info",msg:"In progress — being worked on."},
+    DONE:{cls:"done",dot:"ok",msg:"Completed — fully processed and delivered."},
+    NEEDS_REVIEW:{cls:"review",dot:"warn",msg:"Waiting on your decision."},
+    FAILED:{cls:"failed",dot:"crit",msg:"Needs an engineer — already queued; nothing for you to do."},
+  };
+  const STAGES = ["INGESTED","PROCESSING","TRANSFORMED","GEOCODED","DISPATCHED","DONE"];
+  let forms = [
+    { id:"3c857321", session:"c8267b77-d796", ref:"GRU-123089", status:"DONE", stage:5, attempts:0, recv:"12:04", flags:[], outbox:{FORMBOT:"DELIVERED",EMAIL:"DELIVERED"} },
+    { id:"7cb89915", session:"c77fb77f-5a95", ref:"GRU-123090", status:"DONE", stage:5, attempts:0, recv:"12:06", flags:[["lossy_name_split","a middle name was dropped"]], outbox:{FORMBOT:"DELIVERED",EMAIL:"DELIVERED"} },
+    { id:"a1f0e7bd", session:"881fa3b2-84cd", ref:"GRU-123092", status:"NEEDS_REVIEW", stage:2, attempts:0, recv:"12:09", reason:"Email field missing — waiting on a mapping (see To review).", flags:[], outbox:{} },
+    { id:"b2c4d6e8", session:"4b19aa21-77cd", ref:"GRU-123095", status:"FAILED", stage:3, attempts:1, recv:"12:12", reason:"Unexpected error while geocoding (our code).", err:"TypeError: cannot read 'latitude' of undefined", flags:[], outbox:{EMAIL:"DELIVERED"} },
+    { id:"c9d8e7f6", session:"9a02bb55-1c0e", ref:"GRU-123098", status:"PROCESSING", stage:1, attempts:1, recv:"12:14", flags:[], outbox:{} },
+    { id:"d4e5f6a7", session:"7f31cc99-ab12", ref:"GRU-123101", status:"PENDING", stage:0, attempts:0, recv:"12:15", flags:[], outbox:{} },
+    { id:"e1f2a3b4", session:"22dd44ee-90fa", ref:"GRU-123104", status:"NEEDS_REVIEW", stage:1, attempts:5, recv:"12:16", reason:"Geocoder kept failing — retries exhausted.", flags:[], outbox:{EMAIL:"DELIVERED"} },
+    { id:"f5a6b7c8", session:"6e77aa33-4b55", ref:"GRU-123107", status:"DONE", stage:5, attempts:2, recv:"12:18", flags:[["coerced_gender","an unrecognised gender was coerced"]], outbox:{FORMBOT:"DELIVERED",EMAIL:"DELIVERED"} },
+    { id:"0a1b2c3d", session:"8899aabb-ccdd", ref:"GRU-123110", status:"NEEDS_REVIEW", stage:1, attempts:0, recv:"12:20", reason:"Same session id arrived with different data — needs a human to confirm.", flags:[], outbox:{} },
+    { id:"1b2c3d4e", session:"fedcba98-7654", ref:"GRU-123112", status:"FAILED", stage:1, attempts:1, recv:"12:22", reason:"Bug while transforming (our code).", err:"RangeError: invalid array length", flags:[], outbox:{} },
+    { id:"2c3d4e5f", session:"abcd1234-5678", ref:"GRU-123114", status:"DONE", stage:5, attempts:0, recv:"12:24", flags:[], outbox:{FORMBOT:"DELIVERED",EMAIL:"DELIVERED"} },
+    { id:"3d4e5f60", session:"11aa22bb-33cc", ref:"GRU-123116", status:"PROCESSING", stage:4, attempts:0, recv:"12:25", flags:[], outbox:{EMAIL:"DELIVERED",FORMBOT:"SENDING"} },
+  ];
+
+  // ---- Applied mappings ----
+  let applied = [
+    { kind:"alias", from:"nhs_number", to:"metadata.nhs_number", version:7, by:"you", when:"24m ago" },
+    { kind:"alias", from:"mobile", to:"mobile_number", version:5, by:"auto", when:"5h ago" },
+    { kind:"enum", from:"other", to:"prefer-not-to-say", field:"gender", vmap:true, version:3, by:"auto", when:"1d ago" },
+    { kind:"alias", from:"county", to:"address_line_3", version:6, by:"auto", when:"1h ago" },
+  ];
+
+  // ---- State ----
+  let tab = "review";
+  let rPage = 0, rPer = 5, rType = "all", rSrc = "all";      // review filters
+  let fPage = 0, fPer = 8, fStatus = "all", fQuery = "";      // forms filters
+  let editingIdx = -1;
+  const view = document.getElementById("view");
+
+  const remainingI = () => resolvedI.filter(r => !r).length;
+  const statusCount = s => forms.filter(f => f.status === s).length;
+
+  function updateCounts(){
+    document.getElementById("nReview").textContent = remainingI();
+    document.getElementById("nForms").textContent = forms.length;
+    document.getElementById("nApplied").textContent = applied.length;
+  }
+  function switchTab(t){ tab = t; editingIdx = -1;
+    ["review","forms","applied"].forEach(x => document.getElementById("tab"+x[0].toUpperCase()+x.slice(1)).classList.toggle("on", x===t));
+    render();
+  }
+  function render(){ updateCounts(); tab==="review"?renderReview():tab==="forms"?renderForms():renderApplied(); }
+
+  // ===== REVIEW =====
+  function mapVisual(it){
+    const arrow = `<span class="arrow"><svg><use href="#i-arr"/></svg>${it.vmap?"becomes":"fills"}</span>`;
+    let rows = "";
+    if (it.gone) rows += `<div class="maprow"><span class="maplabel">No longer sent</span><span class="chip gone">${it.gone}</span></div>`;
+    const al = it.vmap ? `Value seen${it.field?" in "+it.field:""}` : (it.gone?"Now arriving":"New field");
+    rows += `<div class="maprow"><span class="maplabel">${al}</span>${it.arrived.map(a=>`<span class="chip arrived">${a}</span>`).join("")}</div>`;
+    rows += `<div class="maprow"><span class="maplabel">${it.vmap?"Record as":"Map to"}</span><span class="chip ${it.vmap?"val":"arrived"}">${it.from}</span>${arrow}<span class="chip target">${it.to}</span>${it.backup?`<span class="maphint">— or ${it.backup} if blank</span>`:""}</div>`;
+    return `<div class="map">${rows}</div>`;
+  }
+  function renderReview(){
+    const activeIdx = issues.map((_,i)=>i).filter(i => !resolvedI[i] && (rType==="all"||issues[i].type===rType) && (rSrc==="all"||issues[i].src===rSrc));
+    const done = resolvedI.filter(Boolean).length, total = issues.length;
+    const pages = Math.max(1, Math.ceil(activeIdx.length / rPer));
+    if (rPage >= pages) rPage = pages - 1;
+    const slice = activeIdx.slice(rPage*rPer, rPage*rPer + rPer);
+
+    const typeChip = (v,l) => `<button class="fchip ${rType===v?"on":""}" onclick="rType='${v}';rPage=0;render()">${l}</button>`;
+    const srcChip  = (v,l) => `<button class="fchip ${rSrc===v?"on":""}" onclick="rSrc='${v}';rPage=0;render()">${l}</button>`;
+
+    view.innerHTML =
+      `<h1>Issues to review</h1><p class="sub">Each is one decision. Approving applies the fix automatically to the waiting forms — reversible.</p>`+
+      `<div class="overall"><div class="track"><div class="fill" style="width:${Math.round(done/total*100)}%"></div></div><span class="txt"><b>${done}</b> of ${total} reviewed</span></div>`+
+      `<div class="filters"><div class="chips">${typeChip("all","All")}${typeChip("rename","Renames")}${typeChip("enum","Values")}${typeChip("format","Formats")}</div>`+
+        `<div class="chips" style="margin-left:auto">${srcChip("all","Any source")}${srcChip("rule","Automatic")}${srcChip("llm","Claude")}</div></div>`+
+      `<div class="list">`+ (slice.length?slice.map(i=>reviewCard(i)).join(""):`<div class="empty">No issues match these filters.</div>`) +`</div>`+
+      pager(rPage, pages, "rPage");
+  }
+  function reviewCard(i){
+    const it = issues[i];
+    return `<div class="item"><div class="rowhead"><span class="dot"></span>`+
+      `<div class="main"><div class="title">${it.title}</div><div class="meta"><b>${it.count.toLocaleString()}</b> forms waiting · ${TYPES[it.type]}</div></div>`+
+      `<div class="gauge ${confClass(it.confidence)}"><div class="track"><div class="fill" style="width:${it.confidence}%"></div></div><div class="gtext"><b>${it.confidence}%</b> ${confWord(it.confidence)}</div></div></div>`+
+      `<div class="detail-static">${mapVisual(it)}`+
+        `<p class="consequence"><span class="srctag">${it.src==="llm"?"Claude suggestion":"auto-suggested"}</span> Approving fixes all ${it.count.toLocaleString()} waiting forms and future ones, and can be undone.</p>`+
+        `<div class="actions"><button class="btn primary" onclick="approveI(${i})"><svg><use href="#i-check"/></svg>Approve fix</button>`+
+          `<button class="btn"><svg><use href="#i-edit"/></svg>Adjust</button><button class="btn ghost"><svg><use href="#i-x"/></svg>Dismiss</button></div></div></div>`;
+  }
+  function approveI(i){ resolvedI[i]=true; render(); }
+
+  // ===== FORMS =====
+  function renderForms(){
+    const counts = { all:forms.length, NEEDS_REVIEW:statusCount("NEEDS_REVIEW"), FAILED:statusCount("FAILED"), PENDING:statusCount("PENDING")+statusCount("PROCESSING"), DONE:statusCount("DONE") };
+    const metric = (k,v,l,cls)=>`<div class="metric ${cls} ${fStatus===k?"on":""}" onclick="fStatus='${k}';fPage=0;render()"><div class="v">${v}</div><div class="k">${l}</div></div>`;
+    const q = fQuery.trim().toLowerCase();
+    let rows = forms.filter(f =>
+      (fStatus==="all" || f.status===fStatus || (fStatus==="PENDING" && (f.status==="PENDING"||f.status==="PROCESSING"))) &&
+      (!q || f.session.toLowerCase().includes(q) || f.ref.toLowerCase().includes(q) || f.id.includes(q)));
+    const pages = Math.max(1, Math.ceil(rows.length / fPer));
+    if (fPage>=pages) fPage=pages-1;
+    const slice = rows.slice(fPage*fPer, fPage*fPer+fPer);
+
+    view.innerHTML =
+      `<h1>Forms</h1><p class="sub">Every ingested form and where it is. The <b>Needs review</b> and <b>Failed</b> tiles are the dead-letter queues.</p>`+
+      `<div class="metrics">${metric("all",counts.all,"All forms","")}${metric("PENDING",counts.PENDING,"In progress","info")}${metric("DONE",counts.DONE,"Done","ok")}${metric("NEEDS_REVIEW",counts.NEEDS_REVIEW,"Needs review","warn")}${metric("FAILED",counts.FAILED,"Failed","crit")}</div>`+
+      `<div class="filters"><div class="search"><svg><use href="#i-search"/></svg><input id="q" placeholder="Search by session id or reference…" value="${fQuery}" oninput="fQuery=this.value;fPage=0;renderFormsKeepFocus()"></div></div>`+
+      `<div class="list">`+ (slice.length?slice.map(formRow).join(""):`<div class="empty">No forms match.</div>`) +`</div>`+
+      pager(fPage, pages, "fPage");
+    const qi = document.getElementById("q"); if (qi && qi.value){ qi.focus(); qi.setSelectionRange(qi.value.length,qi.value.length); }
+  }
+  function renderFormsKeepFocus(){ renderForms(); }
+  function formRow(f){
+    const s = STATUS[f.status];
+    const dl = f.status==="NEEDS_REVIEW" || f.status==="FAILED";
+    return `<div class="item"><div class="rowhead link" onclick="openDetail('${f.id}')"><span class="dot ${s.dot}"></span>`+
+      `<div class="main"><div class="title">${f.ref}</div><div class="meta">${f.session} · recv ${f.recv}${f.attempts?` · ${f.attempts} attempt${f.attempts>1?"s":""}`:""}</div></div>`+
+      `<span class="pill ${s.cls}">${f.status.replace("_"," ")}</span></div>`+
+      (dl ? `<div class="detail-static"><p class="reason">${f.status==="FAILED"?"<b>Failed:</b> ":""}${f.reason||""}</p>`+
+        `<div class="actions"><button class="btn primary" onclick="replay('${f.id}')"><svg><use href="#i-replay"/></svg>Replay</button>`+
+        `<button class="btn" onclick="openDetail('${f.id}')">Open details</button></div></div>` : "")+
+      `</div>`;
+  }
+  function replay(id){ const f = forms.find(x=>x.id===id); if (f){ f.status="DONE"; f.stage=5; f.reason=null; f.err=null; f.outbox={FORMBOT:"DELIVERED",EMAIL:"DELIVERED"}; } closeDetail(); render(); }
+
+  // ===== DETAIL DRAWER =====
+  function openDetail(id){
+    const f = forms.find(x=>x.id===id); if(!f) return;
+    if (id !== currentId) reveal = { rx:false, sx:false }; // reset reveal when opening a new form
+    currentId = id;
+    const s = STATUS[f.status];
+    const reached = f.status==="DONE" ? 6 : f.stage+1;
+    const terminalBad = f.status==="NEEDS_REVIEW"||f.status==="FAILED";
+    const tl = STAGES.map((st,i)=>{
+      let cls = i < reached ? "" : "pending";
+      if (terminalBad && i === f.stage) cls = f.status==="FAILED" ? "crit" : "warn";
+      const tm = i < reached ? "12:"+(4+i)+"…Z" : "";
+      return `<li class="${cls}"><span class="d"></span><span class="st">${st}</span>${tm?` <span class="tm">${tm}</span>`:""}</li>`;
+    }).join("");
+    const ob = Object.keys(f.outbox).length
+      ? Object.entries(f.outbox).map(([t,st])=>`<div class="kv"><span class="k">${t}</span><span class="v">${st}</span></div>`).join("")
+      : `<div class="kv"><span class="k">—</span><span class="v">not enqueued yet</span></div>`;
+    const flags = f.flags.length
+      ? f.flags.map(([c,d])=>`<div class="flagrow"><span class="fc">${c}</span><span>${d}</span></div>`).join("")
+      : `<div class="flagrow" style="color:var(--muted)">No flags</div>`;
+    document.getElementById("drawer").innerHTML =
+      `<div class="dh"><button class="back" onclick="closeDetail()"><svg><use href="#i-left"/></svg>Back</button></div>`+
+      `<div class="db"><h2>${f.ref}</h2><div class="did">session ${f.session}</div>`+
+      `<div class="statusline"><span class="pill ${s.cls}">${f.status.replace("_"," ")}</span></div>`+
+      `<p class="statusmsg">${s.msg}</p>`+
+      (f.reason?`<p class="reason">${f.status==="FAILED"?"<b>Failed:</b> ":""}${f.reason}</p>`:"")+
+      (f.err?`<div class="errbox">${f.err}</div>`:"")+
+      ((f.status==="NEEDS_REVIEW"||f.status==="FAILED")?`<div class="actions" style="border:0;padding:14px 0 0;margin:14px 0 0"><button class="btn primary" onclick="replay('${f.id}')"><svg><use href="#i-replay"/></svg>Replay this form</button></div>`:"")+
+      `<div class="sec">Progress</div><ul class="tl">${tl}</ul>`+
+      `<div class="sec">What we received <span class="redtag">${reveal.rx?"revealed":"redacted"}</span>${revealBtn("rx")}</div>${receivedData()}`+
+      `<div class="sec">What we sent <span class="redtag">${reveal.sx?"revealed":"redacted"}</span>${revealBtn("sx")}</div>${sentData(f)}`+
+      `<div class="sec">Deliveries</div>${ob}`+
+      `<div class="sec">Flags</div>${flags}`+
+      `<div class="sec">Details</div>`+
+        `<div class="kv"><span class="k">Form id</span><span class="v">${f.id}</span></div>`+
+        `<div class="kv"><span class="k">Reference</span><span class="v">${f.ref}</span></div>`+
+        `<div class="kv"><span class="k">Idempotency key</span><span class="v">${f.session}</span></div>`+
+        `<div class="kv"><span class="k">Payload hash</span><span class="v">sha256:9c21…b4</span></div>`+
+        `<div class="kv"><span class="k">Attempts</span><span class="v">${f.attempts}</span></div>`+
+        `<div class="kv"><span class="k">Received</span><span class="v">${f.recv}Z</span></div>`+
+      `</div>`;
+    document.getElementById("drawer").classList.add("show");
+    document.getElementById("scrim").classList.add("show");
+  }
+  function closeDetail(){ document.getElementById("drawer").classList.remove("show"); document.getElementById("scrim").classList.remove("show"); }
+
+  // Redacted by default. A gated "reveal" shows the real value and writes an audit entry.
+  let currentId = null, reveal = { rx:false, sx:false };
+  const kv = rows => rows.map(([k,v,m])=>`<div class="kv"><span class="k">${k}</span><span class="v ${m?"masked":""}">${v}</span></div>`).join("");
+  const RX = { masked:[["name","J••• D•••"],["email","j•••@e•••.com"],["gender","male"],["date_of_birth","19••-••-••"],["mobile_number","07•••••123"],["address_line_1","•• ••••• Road"],["postcode","E15 •••"],["country","United Kingdom"]],
+               real:[["name","John Doe"],["email","john.doe@example.com"],["gender","male"],["date_of_birth","1990-01-01"],["mobile_number","07123456789"],["address_line_1","50C Romford Road"],["postcode","E15 4BZ"],["country","United Kingdom"]] };
+  const SX = { masked:[["firstName","J•••"],["lastName","D•••"],["email","j•••@e•••.com"],["gender","male"],["dateOfBirth","19••-••-••"],["mobileNumber","07•••••123"],["postcode","E15 •••"],["longitude","-2.59"],["latitude","51.45"]],
+               real:[["firstName","John"],["lastName","Doe"],["email","john.doe@example.com"],["gender","male"],["dateOfBirth","1990-01-01"],["mobileNumber","07123456789"],["postcode","E15 4BZ"],["longitude","-2.59"],["latitude","51.45"]] };
+  const auditLine = `<p class="auditnote">⚠ Values revealed by you — logged to the audit trail at 12:26Z.</p>`;
+  function revealBtn(which){ const on = reveal[which]; return `<button class="revealbtn" onclick="toggleReveal('${which}')">${on?"Hide":"Reveal"}</button>`; }
+  function toggleReveal(which){ reveal[which] = !reveal[which]; if (currentId) openDetail(currentId); }
+
+  function receivedData(){
+    const r = reveal.rx;
+    return `<p class="datanote">The incoming form. ${r?"Showing real values.":"Values are masked — no personal data is shown."}</p>`+
+      (r?auditLine:"")+ kv((r?RX.real:RX.masked).map(([k,v])=>[k,v,!r]));
+  }
+  function sentData(f){
+    if (f.stage < 2) return `<div class="datanote">Not produced yet — the form stopped at ${STAGES[f.stage]||"ingest"}.</div>`;
+    const r = reveal.sx, sent = f.outbox.FORMBOT === "DELIVERED";
+    return `<div class="datanote">${sent?"Delivered to FORM-BOT.":"Transformed, not yet delivered to FORM-BOT."}</div>`+
+      (r?auditLine:"")+ kv((r?SX.real:SX.masked).map(([k,v])=>[k,v,!r]));
+  }
+
+  // ===== APPLIED + NEW =====
+  function renderApplied(){
+    view.innerHTML = `<h1>Applied mappings</h1><p class="sub">The active rules the pipeline uses. Editing creates a new version; deactivating rolls back.</p>`+
+      `<div class="form" id="newForm" hidden></div><div class="list" id="appliedList"></div>`;
+    document.getElementById("appliedList").innerHTML = applied.length ? applied.map(appliedCard).join("") : `<div class="empty">No mappings yet — use “New mapping”.</div>`;
+    if (pendingOpenNew){ buildNewForm(); pendingOpenNew=false; }
+  }
+  function appliedCard(m, i){
+    const body = editingIdx===i
+      ? `<div class="detail-static"><label class="fl">Change what it maps to (saves as v${m.version+1})</label>`+
+          `<input type="text" id="editTo${i}" value="${m.to}" style="max-width:280px">`+
+          `<div class="actions"><button class="btn primary" onclick="saveEdit(${i})"><svg><use href="#i-check"/></svg>Save new version</button><button class="btn ghost" onclick="editingIdx=-1;render()"><svg><use href="#i-x"/></svg>Cancel</button></div></div>`
+      : `<div class="detail-static"><div class="actions" style="border:0;padding:0;margin:0"><button class="btn" onclick="editMapping(${i})"><svg><use href="#i-edit"/></svg>Edit</button><button class="btn ghost" onclick="deactivate(${i})"><svg><use href="#i-undo"/></svg>Deactivate</button></div></div>`;
+    return `<div class="item amap"><div class="rowhead"><span class="dot"></span>`+
+      `<div class="main"><div class="title"><span class="chip ${m.vmap?"val":"arrived"}">${m.vmap&&m.field?m.field+": ":""}${m.from}</span> <span class="arrow"><svg><use href="#i-arr"/></svg>${arrowWord(m)}</span> <span class="chip target">${m.to}</span></div>`+
+      `<div class="ammeta">v${m.version} · ${m.kind} · by ${m.by} · ${m.when}</div></div>`+
+      `<span class="badge-active">active</span></div>${body}</div>`;
+  }
+  function editMapping(i){ editingIdx=i; render(); }
+  function saveEdit(i){ const v=document.getElementById("editTo"+i).value.trim(); if(v) applied[i]={...applied[i],to:v,version:applied[i].version+1,by:"you",when:"just now"}; editingIdx=-1; render(); }
+  function deactivate(i){ applied.splice(i,1); editingIdx=-1; render(); }
+
+  let pendingOpenNew=false;
+  function openNew(){ if(tab!=="applied"){ pendingOpenNew=true; switchTab("applied"); } else buildNewForm(); }
+  function buildNewForm(){
+    const f = document.getElementById("newForm"); if(!f) return; f.hidden=false;
+    f.innerHTML = `<h3>Add a mapping</h3>`+
+      `<div class="two"><div><label class="fl">What kind</label><select id="nfKind" onchange="nfPrev()"><option value="alias">Rename a field</option><option value="enum">Map a value</option><option value="format">Reformat a value</option></select></div>`+
+      `<div><label class="fl">Apply to</label><div class="scope"><label><input type="radio" name="nfScope" checked> All + future</label><label><input type="radio" name="nfScope"> Future only</label></div></div></div>`+
+      `<div class="two" style="margin-top:12px"><div><label class="fl" id="nfFromL">Incoming field</label><input type="text" id="nfFrom" placeholder="e.g. work_email" oninput="nfPrev()"></div>`+
+      `<div><label class="fl" id="nfToL">Fills schema field</label><input type="text" id="nfTo" placeholder="e.g. email" oninput="nfPrev()"></div></div>`+
+      `<div class="map" id="nfPrev" style="margin-top:14px"></div>`+
+      `<div class="formactions"><button class="btn primary" onclick="saveNew()"><svg><use href="#i-check"/></svg>Add mapping</button><button class="btn ghost" onclick="document.getElementById('newForm').hidden=true"><svg><use href="#i-x"/></svg>Cancel</button></div>`;
+    nfPrev();
+  }
+  function nfPrev(){
+    const kind=document.getElementById("nfKind").value, vmap=kind!=="alias";
+    document.getElementById("nfFromL").textContent = vmap?"Incoming value":"Incoming field";
+    document.getElementById("nfToL").textContent = vmap?"Record it as":"Fills schema field";
+    const from=document.getElementById("nfFrom").value.trim()||"…", to=document.getElementById("nfTo").value.trim()||"…";
+    document.getElementById("nfPrev").innerHTML = `<div class="maprow"><span class="maplabel">Mapping</span><span class="chip ${vmap?"val":"arrived"}">${from}</span><span class="arrow"><svg><use href="#i-arr"/></svg>${vmap?"becomes":"fills"}</span><span class="chip target">${to}</span></div>`;
+  }
+  function saveNew(){ const kind=document.getElementById("nfKind").value, from=document.getElementById("nfFrom").value.trim(), to=document.getElementById("nfTo").value.trim(); if(!from||!to) return;
+    applied.unshift({kind,from,to,vmap:kind!=="alias",field:kind!=="alias"?"value":undefined,version:1,by:"you",when:"just now"}); render(); }
+
+  // ---- shared ----
+  function pager(p, pages, varName){
+    return `<div class="pager"><button onclick="${varName}--;render()" ${p===0?"disabled":""}><svg><use href="#i-left"/></svg>Prev</button>`+
+      `<span class="of">Page ${p+1} of ${pages}</span>`+
+      `<button onclick="${varName}++;render()" ${p>=pages-1?"disabled":""}>Next<svg><use href="#i-right"/></svg></button></div>`;
+  }
+
+  render();
+</script>
